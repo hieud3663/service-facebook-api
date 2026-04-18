@@ -1,0 +1,383 @@
+openapi: 3.0.3
+info:
+  title: Facebook Page Service API
+  version: 1.0.0
+  description: Backend APIs for Facebook Page management/integration
+paths:
+  /api/page/{page_id}:
+    get:
+      operationId: page_retrieve
+      summary: Get page information
+      parameters:
+      - in: path
+        name: page_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - page
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: Facebook page detail
+  /api/page/{page_id}/insights:
+    get:
+      operationId: page_insights_retrieve
+      summary: Get page insights
+      parameters:
+      - in: query
+        name: metric
+        schema:
+          enum:
+          - page_media_view
+          - post_media_view
+          - post_total_media_view_unique
+          type: string
+          default: page_media_view
+          minLength: 1
+        description: |-
+          Use one of the safe metrics below to avoid invalid metric errors.
+
+          * `page_media_view` - page_media_view
+          * `post_media_view` - post_media_view
+          * `post_total_media_view_unique` - post_total_media_view_unique
+      - in: path
+        name: page_id
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: period
+        schema:
+          enum:
+          - day
+          - week
+          - days_28
+          - lifetime
+          type: string
+          default: day
+          minLength: 1
+        description: |-
+          * `day` - day
+          * `week` - week
+          * `days_28` - days_28
+          * `lifetime` - lifetime
+      tags:
+      - page
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: Page insights
+  /api/page/{page_id}/posts:
+    get:
+      operationId: page_posts_retrieve
+      summary: Get page posts
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 10
+      - in: path
+        name: page_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - page
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: List posts from a Facebook page
+    post:
+      operationId: page_posts_create
+      summary: Create a page post
+      parameters:
+      - in: path
+        name: page_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - page
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '201':
+          description: Post created successfully
+        '400':
+          description: Validation error or Facebook API error
+  /api/page/post/{post_id}:
+    delete:
+      operationId: page_post_destroy
+      summary: Delete a post
+      parameters:
+      - in: path
+        name: post_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - page
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: Delete result
+  /api/page/post/{post_id}/comments:
+    get:
+      operationId: page_post_comments_retrieve
+      summary: Get post comments
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 10
+      - in: path
+        name: post_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - page
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: Comments list
+  /api/page/post/{post_id}/likes:
+    get:
+      operationId: page_post_likes_retrieve
+      summary: Get post likes
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 10
+      - in: path
+        name: post_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - page
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: Likes list
+  /api/schema/:
+    get:
+      operationId: schema_retrieve
+      description: |-
+        OpenApi3 schema for this API. Format can be selected via content negotiation.
+
+        - YAML: application/vnd.oai.openapi
+        - JSON: application/vnd.oai.openapi+json
+      parameters:
+      - in: query
+        name: format
+        schema:
+          type: string
+          enum:
+          - json
+          - yaml
+      - in: query
+        name: lang
+        schema:
+          type: string
+          enum:
+          - af
+          - ar
+          - ar-dz
+          - ast
+          - az
+          - be
+          - bg
+          - bn
+          - br
+          - bs
+          - ca
+          - ckb
+          - cs
+          - cy
+          - da
+          - de
+          - dsb
+          - el
+          - en
+          - en-au
+          - en-gb
+          - eo
+          - es
+          - es-ar
+          - es-co
+          - es-mx
+          - es-ni
+          - es-ve
+          - et
+          - eu
+          - fa
+          - fi
+          - fr
+          - fy
+          - ga
+          - gd
+          - gl
+          - he
+          - hi
+          - hr
+          - hsb
+          - hu
+          - hy
+          - ia
+          - id
+          - ig
+          - io
+          - is
+          - it
+          - ja
+          - ka
+          - kab
+          - kk
+          - km
+          - kn
+          - ko
+          - ky
+          - lb
+          - lt
+          - lv
+          - mk
+          - ml
+          - mn
+          - mr
+          - ms
+          - my
+          - nb
+          - ne
+          - nl
+          - nn
+          - os
+          - pa
+          - pl
+          - pt
+          - pt-br
+          - ro
+          - ru
+          - sk
+          - sl
+          - sq
+          - sr
+          - sr-latn
+          - sv
+          - sw
+          - ta
+          - te
+          - tg
+          - th
+          - tk
+          - tr
+          - tt
+          - udm
+          - ug
+          - uk
+          - ur
+          - uz
+          - vi
+          - zh-hans
+          - zh-hant
+      tags:
+      - schema
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/vnd.oai.openapi:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/yaml:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/vnd.oai.openapi+json:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+components:
+  schemas:
+    PostCreate:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Post content text shown on the Facebook Page feed.
+          maxLength: 5000
+        link:
+          type: string
+          format: uri
+          description: Optional URL to attach to the post.
+        published:
+          type: boolean
+          default: true
+          description: Set true to publish immediately.
+        return_post_detail:
+          type: boolean
+          default: false
+          description: Set true to return created post detail right after successful
+            creation.
+      required:
+      - message
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid

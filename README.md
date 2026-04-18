@@ -61,8 +61,37 @@ Implemented endpoints:
    - `python manage.py migrate`
    - `python manage.py runserver`
 
+## Run with Docker
+
+1. Create `.env` from `.env.example` and fill required values.
+2. Build and run:
+  - `docker compose up --build`
+3. API will be available at `http://localhost:8000`.
+
+The container startup will automatically run:
+- `python manage.py migrate --noinput`
+- `python manage.py collectstatic --noinput`
+- `gunicorn config.wsgi:application --bind 0.0.0.0:8000`
+
 ## API docs
 
 - Schema: `GET /api/schema/`
 - Swagger UI: `GET /api/docs/swagger/`
 - ReDoc: `GET /api/docs/redoc/`
+
+## GitHub Actions CI/CD
+
+Workflow file: `.github/workflows/ci-cd.yml`
+
+Pipeline behavior:
+- CI on pull request and push to `main`/`master`:
+  - install dependencies
+  - `python manage.py check`
+  - `python manage.py migrate --noinput`
+  - `python manage.py test`
+  - `python manage.py spectacular --file schema.yaml --validate`
+- CD on push to `main`:
+  - build Docker image
+  - push to GitHub Container Registry: `ghcr.io/<owner>/<repo>`
+
+No extra secret is required for GHCR publish in the same repository because workflow uses `GITHUB_TOKEN` with `packages: write` permission.
