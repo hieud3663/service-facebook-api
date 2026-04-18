@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   ci:
@@ -43,8 +42,8 @@ jobs:
       - name: Validate OpenAPI schema
         run: python manage.py spectacular --file schema.yaml --validate
 
-  docker:
-    name: Docker Build and Publish
+  deploy:
+    name: Deploy on VPS (Self-hosted)
     runs-on: self-hosted
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -53,25 +52,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Stop existing containers
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          docker compose down --remove-orphans || true
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=sha
-            type=raw,value=latest
+      - name: Build and start services
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          docker compose up -d --build
 
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Show container status
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          docker compose ps
+
+      - name: Health check
+        run: |
+          max_attempts=12
+          attempt=0
+
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -fsS http://localhost:8000/api/schema/ > /dev/null; then
+              echo "Application is healthy"
+              exit 0
+            fi
+
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts failed, retrying in 5s..."
+            sleep 5
+          done
+
+          echo "Health check failed"
+          cd "$GITHUB_WORKSPACE"
+          docker compose logs --tail=120 web
+          exit 1
