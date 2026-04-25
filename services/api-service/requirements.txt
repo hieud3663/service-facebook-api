@@ -1,4 +1,4 @@
-# Lõi Framework
+# Core Framework
 Django
 djangorestframework
 drf-spectacular

@@ -39,6 +39,9 @@ jobs:
       - name: Run tests
         run: python manage.py test
 
+      - name: Copy .env file
+        run: cp /home/ubuntu/.env.facebook .env
+
       - name: Validate OpenAPI schema
         run: python manage.py spectacular --file schema.yaml --validate
 
@@ -73,7 +76,7 @@ jobs:
           attempt=0
 
           while [ $attempt -lt $max_attempts ]; do
-            if curl -fsS http://localhost:8000/api/schema/ > /dev/null; then
+            if curl -fsS http://localhost:3001/api/schema/ > /dev/null; then
               echo "Application is healthy"
               exit 0
             fi

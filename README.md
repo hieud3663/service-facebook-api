@@ -1,17 +1,64 @@
 # service-facebook-api
 
-Django REST backend for Facebook Page integration.
+Microservices-based backend for Facebook Page integration.
+
+## Architecture
+
+```
+                  ┌──────────┐
+   Client ──────► │  Nginx   │ :80
+                  │ Gateway  │
+                  └────┬─────┘
+                       │
+          ┌────────────┼────────────┐
+          │                         │
+    /api/* │                   /webhook* │
+          ▼                         ▼
+  ┌──────────────┐         ┌───────────────┐
+  │  api-service │ :8000   │webhook-service│ :3001
+  │  (Graph API) │         │ (Kafka ingest)│
+  └──────────────┘         └───────┬───────┘
+                                   │
+                              ┌────▼────┐
+                              │  Kafka  │ :9092
+                              └─────────┘
+```
+
+| Service | Port | Description |
+|---------|------|-------------|
+| **Nginx** | 80 | API gateway – single entry-point |
+| **api-service** | 8000 | REST APIs for Facebook Page (Graph API) |
+| **webhook-service** | 3001 | Realtime webhook ingestion → Kafka |
+| **Kafka** | 9092 | Event streaming broker |
+| **Zookeeper** | 2181 | Kafka coordination |
 
 ## Project Structure
 
-- `config/`: project config (`urls.py`, `asgi.py`, `wsgi.py`, split settings)
-- `config/settings/base.py`: base settings
-- `config/settings/development.py`: local dev settings
-- `config/settings/production.py`: production settings
-- `config/settings/test.py`: test settings
-- `apps/facebook_api/`: API app for Facebook Page Graph operations
+```
+services/
+├── docker-compose.yml          # Orchestrates all services
+├── nginx/
+│   ├── Dockerfile
+│   └── nginx.conf              # API gateway routing
+├── api-service/                # Microservice 1
+│   ├── Dockerfile
+│   ├── manage.py
+│   ├── requirements.txt
+│   ├── .env / .env.example
+│   ├── scripts/start.sh
+│   ├── config/                 # Django settings
+│   └── apps/facebook_api/     # Business logic
+└── webhook-service/            # Microservice 2
+    ├── Dockerfile
+    ├── manage.py
+    ├── requirements.txt
+    ├── .env / .env.example
+    ├── scripts/start.sh
+    ├── config/                 # Django settings
+    └── apps/webhook/           # Business logic
+```
 
-## Phase 1 - Preparation Checklist
+## Phase 1 – Preparation Checklist
 
 ### 1) Create Facebook Page
 - Create a Page in Facebook.
@@ -38,43 +85,100 @@ Django REST backend for Facebook Page integration.
   - token value (or partially masked)
   - permissions list
 
-Put token and app/page config into `.env` (copy from `.env.example`).
+Put token and app/page config into each service's `.env` (copy from `.env.example`).
 
-## Phase 2 - Backend APIs
+### 4) Webhook Setup on Meta App Dashboard
+To stream live events to your local machine, you need to expose your local Nginx gateway (port 3000) to the internet and configure Facebook Webhook.
 
-Implemented endpoints:
+1. **Expose local port using Ngrok**:
+   ```bash
+   ngrok http 3000
+   ```
+   *Copy the generated `https://...ngrok-free.app` URL.*
 
-- `GET /api/page/{pageId}`
-- `GET /api/page/{pageId}/posts`
-- `POST /api/page/{pageId}/posts`
-- `DELETE /api/page/post/{postId}`
-- `GET /api/page/post/{postId}/comments`
-- `GET /api/page/post/{postId}/likes`
-- `GET /api/page/{pageId}/insights`
+2. **Setup Webhook Product**:
+   - In Meta App Dashboard, click **Add Product** and select **Webhooks**.
+   - Choose **Page** from the dropdown and click **Subscribe to this object**.
+   - **Callback URL**: Enter `https://<your-ngrok-url>/webhook`
+   - **Verify Token**: Enter the text you wrote in your `.env` for `FACEBOOK_WEBHOOK_VERIFY_TOKEN` (e.g. `your-webhook-verify-token`).
+   - Click **Verify and Save**. (Make sure your Docker services are running!)
 
-## Run locally
+3. **Subscribe to Webhook Fields**:
+   - Under Page webhooks, find the `feed` and `messages` fields and click **Subscribe**.
+   - Alternatively, use the `POST /webhook/subscriptions/comments` API provided in this service to programmatically subscribe the Page using the API.
 
-1. Install dependencies:
-   - `pip install -r requirements.txt`
-2. Create `.env` from `.env.example` and fill values.
-3. Run server:
-   - `python manage.py migrate`
-   - `python manage.py runserver`
+## Phase 2 – API Service Endpoints
 
-## Run with Docker
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET`  | `/api/page/{pageId}` | Page detail |
+| `GET`  | `/api/page/{pageId}/posts` | List posts |
+| `POST` | `/api/page/{pageId}/posts` | Create post |
+| `DELETE`| `/api/page/post/{postId}` | Delete post |
+| `GET`  | `/api/page/post/{postId}/comments` | Post comments |
+| `GET`  | `/api/page/post/{postId}/likes` | Post likes |
+| `GET`  | `/api/page/{pageId}/insights` | Page insights |
 
-1. Create `.env` from `.env.example` and fill required values.
-2. Build and run:
-  - `docker compose up --build`
-3. API will be available at `http://localhost:8000`.
+## Phase 4 – Webhook Service Endpoints
 
-The container startup will automatically run:
-- `python manage.py migrate --noinput`
-- `python manage.py collectstatic --noinput`
-- `gunicorn config.wsgi:application --bind 0.0.0.0:8000`
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET`  | `/webhook` | Facebook webhook verification (`hub.challenge`) |
+| `POST` | `/webhook` | Verify signature, normalize payload, publish to Kafka |
+| `POST` | `/webhook/subscriptions/comments` | Register Page subscription (`feed`) |
+
+### Normalized Event Schema
+
+| Field | Description |
+|-------|-------------|
+| `event_id` | UUID for each normalized event |
+| `source` | Always `"facebook"` |
+| `object` | Payload object type |
+| `event_type` | `"comment"`, `"message"`, or `"unknown"` |
+| `occurred_at` | ISO 8601 timestamp |
+| `page_id` | Facebook Page ID |
+| `sender_id` | Who triggered the event |
+| `target_id` | Target post/comment ID |
+| `channel` | `"facebook_page"` or `"facebook_messenger"` |
+| `meta` | Additional event metadata |
+| `raw_event` | Original Facebook payload |
+
+Kafka topic: `raw_events` (configurable via `KAFKA_RAW_EVENTS_TOPIC`).
+
+## Run with Docker (Microservices)
+
+```bash
+cd services
+docker compose up --build
+```
+
+Services will be available at:
+- **Gateway**: `http://localhost` (port 80)
+- **API docs**: `http://localhost/api/docs/swagger/`
+- **Webhook**: `http://localhost/webhook`
+- **Kafka broker**: `localhost:9092`
+
+## Run locally (Single service)
+
+```bash
+cd services/api-service
+pip install -r requirements.txt
+cp .env.example .env   # fill values
+python manage.py migrate
+python manage.py runserver 8000
+```
+
+```bash
+cd services/webhook-service
+pip install -r requirements.txt
+cp .env.example .env   # fill values
+python manage.py migrate
+python manage.py runserver 3001
+```
 
 ## API docs
 
+Via Nginx gateway:
 - Schema: `GET /api/schema/`
 - Swagger UI: `GET /api/docs/swagger/`
 - ReDoc: `GET /api/docs/redoc/`

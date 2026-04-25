@@ -22,7 +22,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "drf_spectacular",
-    "apps.facebook_api",
+    "apps.webhook",
 ]
 
 MIDDLEWARE = [
@@ -89,12 +89,18 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "Facebook Page Service API",
-    "DESCRIPTION": "Backend APIs for Facebook Page management/integration",
+    "TITLE": "Webhook Service – Facebook Ingestion",
+    "DESCRIPTION": "Microservice: Event Webhook from Facebook and Kafka ingestion flow",
     "VERSION": "1.0.0",
 }
 
 FACEBOOK_GRAPH_API_VERSION = env("FACEBOOK_GRAPH_API_VERSION", default="v22.0")
 FACEBOOK_PAGE_ACCESS_TOKEN = env("FACEBOOK_PAGE_ACCESS_TOKEN", default="")
-FACEBOOK_APP_ID = env("FACEBOOK_APP_ID", default="")
-FACEBOOK_APP_SECRET = env("FACEBOOK_APP_SECRET", default="")
+FACEBOOK_WEBHOOK_VERIFY_TOKEN = env("FACEBOOK_WEBHOOK_VERIFY_TOKEN", default="")
+FACEBOOK_WEBHOOK_SECRET = env("FACEBOOK_WEBHOOK_SECRET", default="")
+
+KAFKA_BOOTSTRAP_SERVERS = env.list("KAFKA_BOOTSTRAP_SERVERS", default=["localhost:9092"])
+KAFKA_RAW_EVENTS_TOPIC = env("KAFKA_RAW_EVENTS_TOPIC", default="raw_events")
+KAFKA_CLIENT_ID = env("KAFKA_CLIENT_ID", default="webhook-service")
+KAFKA_ACKS = env("KAFKA_ACKS", default="all")
+KAFKA_PUBLISH_TIMEOUT_SECONDS = env.int("KAFKA_PUBLISH_TIMEOUT_SECONDS", default=5)

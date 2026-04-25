@@ -1,0 +1,8 @@
+# Core Framework
+Django
+djangorestframework
+drf-spectacular
+django-environ~=0.11.0
+python-dotenv
+gunicorn
+kafka-python-ng
