@@ -63,12 +63,24 @@ class FacebookWebhookAPIView(APIView):
         )
 
 
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import serializers
+
 class FacebookCommentSubscriptionAPIView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
     service_class = FacebookSubscriptionService
 
+    @extend_schema(
+        request=inline_serializer(
+            name="SubscriptionRequest",
+            fields={
+                "page_id": serializers.CharField(required=True, help_text="ID của Fanpage cần đăng ký nhận Notification")
+            },
+        ),
+        responses={200: inline_serializer("SubscriptionResponse", {"status": serializers.CharField(), "page_id": serializers.CharField()})}
+    )
     def post(self, request):
         page_id = request.data.get("page_id")
         if not page_id:
