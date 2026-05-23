@@ -47,3 +47,16 @@ class InsightsQuerySerializer(serializers.Serializer):
 
 class PaginationQuerySerializer(serializers.Serializer):
     limit = serializers.IntegerField(required=False, min_value=1, max_value=100, default=10)
+
+
+class CommentHideSerializer(serializers.Serializer):
+    is_hidden = serializers.BooleanField(required=False, default=True, help_text="True to hide, False to unhide.")
+
+
+class CommentReplySerializer(serializers.Serializer):
+    message = serializers.CharField(required=True, allow_blank=False, max_length=5000, help_text="Reply text.")
+
+
+class MessengerSendSerializer(serializers.Serializer):
+    recipient_id = serializers.CharField(required=True, help_text="Page-scoped user ID (PSID).")
+    message = serializers.CharField(required=True, allow_blank=False, max_length=2000, help_text="Message text.")

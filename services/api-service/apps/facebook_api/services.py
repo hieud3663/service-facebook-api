@@ -116,3 +116,39 @@ class FacebookGraphService:
                 "period": period,
             },
         )
+
+    def hide_comment(self, comment_id: str, is_hidden: bool = True) -> dict[str, Any]:
+        """Hide or unhide a comment via POST /{comment_id}?is_hidden=..."""
+        return self._request("POST", comment_id, data={"is_hidden": str(is_hidden).lower()})
+
+    def reply_comment(self, comment_id: str, message: str) -> dict[str, Any]:
+        """Reply to a comment via POST /{comment_id}/comments"""
+        endpoint = f"{comment_id}/comments"
+        return self._request("POST", endpoint, data={"message": message})
+
+    def send_message(self, recipient_id: str, message: str) -> dict[str, Any]:
+        """Send a message via Messenger Send API: POST /me/messages"""
+        endpoint = "me/messages"
+        import json as _json
+        data_payload = _json.dumps({
+            "recipient": {"id": recipient_id},
+            "messaging_type": "RESPONSE",
+            "message": {"text": message},
+        })
+        # Send API requires JSON body, not form-encoded
+        from urllib.request import Request
+        from urllib.parse import urlencode
+        import json as _json2
+
+        params = {"access_token": self.access_token}
+        url = f"{self.base_url}/{endpoint}?{urlencode(params)}"
+        req = Request(url=url, data=data_payload.encode("utf-8"), method="POST")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            from urllib.request import urlopen
+            with urlopen(req, timeout=30) as response:
+                payload = response.read().decode("utf-8")
+                return _json2.loads(payload) if payload else {}
+        except Exception as exc:
+            raise FacebookServiceError(message=f"Send message failed: {exc}", status_code=502) from exc

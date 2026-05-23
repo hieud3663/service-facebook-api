@@ -1,12 +1,12 @@
 openapi: 3.0.3
 info:
-  title: Facebook Page Service API
+  title: API Service – Facebook Page Management
   version: 1.0.0
-  description: Backend APIs for Facebook Page management/integration
+  description: 'Microservice: REST APIs for Facebook Page management via Graph API'
 paths:
   /api/page/{page_id}:
     get:
-      operationId: page_retrieve
+      operationId: api_page_retrieve
       summary: Get page information
       parameters:
       - in: path
@@ -15,7 +15,7 @@ paths:
           type: string
         required: true
       tags:
-      - page
+      - api
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -25,7 +25,7 @@ paths:
           description: Facebook page detail
   /api/page/{page_id}/insights:
     get:
-      operationId: page_insights_retrieve
+      operationId: api_page_insights_retrieve
       summary: Get page insights
       parameters:
       - in: query
@@ -66,7 +66,7 @@ paths:
           * `days_28` - days_28
           * `lifetime` - lifetime
       tags:
-      - page
+      - api
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -74,9 +74,40 @@ paths:
       responses:
         '200':
           description: Page insights
+  /api/page/{page_id}/messages:
+    post:
+      operationId: api_page_messages_create
+      summary: Send a Messenger message
+      parameters:
+      - in: path
+        name: page_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessengerSend'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MessengerSend'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MessengerSend'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '201':
+          description: Message sent
   /api/page/{page_id}/posts:
     get:
-      operationId: page_posts_retrieve
+      operationId: api_page_posts_retrieve
       summary: Get page posts
       parameters:
       - in: query
@@ -92,7 +123,7 @@ paths:
           type: string
         required: true
       tags:
-      - page
+      - api
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -101,7 +132,7 @@ paths:
         '200':
           description: List posts from a Facebook page
     post:
-      operationId: page_posts_create
+      operationId: api_page_posts_create
       summary: Create a page post
       parameters:
       - in: path
@@ -110,7 +141,7 @@ paths:
           type: string
         required: true
       tags:
-      - page
+      - api
       requestBody:
         content:
           application/json:
@@ -132,9 +163,70 @@ paths:
           description: Post created successfully
         '400':
           description: Validation error or Facebook API error
+  /api/page/comment/{comment_id}/hide:
+    post:
+      operationId: api_page_comment_hide_create
+      summary: Hide or unhide a comment
+      parameters:
+      - in: path
+        name: comment_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentHide'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CommentHide'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CommentHide'
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          description: Hide result
+  /api/page/comment/{comment_id}/replies:
+    post:
+      operationId: api_page_comment_replies_create
+      summary: Reply to a comment
+      parameters:
+      - in: path
+        name: comment_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentReply'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CommentReply'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CommentReply'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '201':
+          description: Reply created
   /api/page/post/{post_id}:
     delete:
-      operationId: page_post_destroy
+      operationId: api_page_post_destroy
       summary: Delete a post
       parameters:
       - in: path
@@ -143,7 +235,7 @@ paths:
           type: string
         required: true
       tags:
-      - page
+      - api
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -153,7 +245,7 @@ paths:
           description: Delete result
   /api/page/post/{post_id}/comments:
     get:
-      operationId: page_post_comments_retrieve
+      operationId: api_page_post_comments_retrieve
       summary: Get post comments
       parameters:
       - in: query
@@ -169,7 +261,7 @@ paths:
           type: string
         required: true
       tags:
-      - page
+      - api
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -179,7 +271,7 @@ paths:
           description: Comments list
   /api/page/post/{post_id}/likes:
     get:
-      operationId: page_post_likes_retrieve
+      operationId: api_page_post_likes_retrieve
       summary: Get post likes
       parameters:
       - in: query
@@ -195,7 +287,7 @@ paths:
           type: string
         required: true
       tags:
-      - page
+      - api
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -205,7 +297,7 @@ paths:
           description: Likes list
   /api/schema/:
     get:
-      operationId: schema_retrieve
+      operationId: api_schema_retrieve
       description: |-
         OpenApi3 schema for this API. Format can be selected via content negotiation.
 
@@ -324,7 +416,7 @@ paths:
           - zh-hans
           - zh-hant
       tags:
-      - schema
+      - api
       security:
       - cookieAuth: []
       - basicAuth: []
@@ -351,6 +443,35 @@ paths:
           description: ''
 components:
   schemas:
+    CommentHide:
+      type: object
+      properties:
+        is_hidden:
+          type: boolean
+          default: true
+          description: True to hide, False to unhide.
+    CommentReply:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Reply text.
+          maxLength: 5000
+      required:
+      - message
+    MessengerSend:
+      type: object
+      properties:
+        recipient_id:
+          type: string
+          description: Page-scoped user ID (PSID).
+        message:
+          type: string
+          description: Message text.
+          maxLength: 2000
+      required:
+      - message
+      - recipient_id
     PostCreate:
       type: object
       properties:

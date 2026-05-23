@@ -3,7 +3,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
-from .serializers import InsightsQuerySerializer, PaginationQuerySerializer, PostCreateSerializer
+from .serializers import (
+    CommentHideSerializer,
+    CommentReplySerializer,
+    InsightsQuerySerializer,
+    MessengerSendSerializer,
+    PaginationQuerySerializer,
+    PostCreateSerializer,
+)
 from .services import FacebookGraphService, FacebookServiceError
 
 
@@ -160,3 +167,62 @@ class PageInsightsAPIView(FacebookBaseAPIView):
         except FacebookServiceError as exc:
             return self.handle_error(exc)
         return Response(data)
+
+
+class CommentHideAPIView(FacebookBaseAPIView):
+    @extend_schema(
+        summary="Hide or unhide a comment",
+        request=CommentHideSerializer,
+        responses={200: OpenApiResponse(description="Hide result")},
+    )
+    def post(self, request, comment_id: str):
+        serializer = CommentHideSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        service = self.get_service()
+        try:
+            result = service.hide_comment(
+                comment_id, is_hidden=serializer.validated_data["is_hidden"]
+            )
+        except FacebookServiceError as exc:
+            return self.handle_error(exc)
+        return Response({"success": True, "comment_id": comment_id, "facebook_response": result})
+
+
+class CommentReplyAPIView(FacebookBaseAPIView):
+    @extend_schema(
+        summary="Reply to a comment",
+        request=CommentReplySerializer,
+        responses={201: OpenApiResponse(description="Reply created")},
+    )
+    def post(self, request, comment_id: str):
+        serializer = CommentReplySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        service = self.get_service()
+        try:
+            result = service.reply_comment(comment_id, message=serializer.validated_data["message"])
+        except FacebookServiceError as exc:
+            return self.handle_error(exc)
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
+class MessengerSendAPIView(FacebookBaseAPIView):
+    @extend_schema(
+        summary="Send a Messenger message",
+        request=MessengerSendSerializer,
+        responses={201: OpenApiResponse(description="Message sent")},
+    )
+    def post(self, request, page_id: str):
+        serializer = MessengerSendSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        service = self.get_service()
+        try:
+            result = service.send_message(
+                recipient_id=serializer.validated_data["recipient_id"],
+                message=serializer.validated_data["message"],
+            )
+        except FacebookServiceError as exc:
+            return self.handle_error(exc)
+        return Response(result, status=status.HTTP_201_CREATED)
