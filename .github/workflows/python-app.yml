@@ -12,8 +12,20 @@ permissions:
 
 jobs:
   ci:
-    name: Django CI
+    name: Django CI (${{ matrix.service }})
     runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api-service
+          - webhook-service
+          - core-service
+          - retry-service
+
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
 
     steps:
       - name: Checkout
@@ -39,16 +51,28 @@ jobs:
       - name: Run tests
         run: python manage.py test
 
-      - name: Copy .env file
-        run: cp /home/ubuntu/.env.facebook .env
-
       - name: Validate OpenAPI schema
+        if: matrix.service != 'webhook-service'
         run: python manage.py spectacular --file schema.yaml --validate
+
+  compose:
+    name: Docker Compose Validation
+    runs-on: self-hosted
+    needs: ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compose config
+        run: |
+          cd services
+          docker compose config
 
   deploy:
     name: Deploy on VPS (Self-hosted)
     runs-on: self-hosted
-    needs: ci
+    needs: compose
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
@@ -57,17 +81,17 @@ jobs:
 
       - name: Stop existing containers
         run: |
-          cd "$GITHUB_WORKSPACE"
+          cd services
           docker compose down --remove-orphans || true
 
       - name: Build and start services
         run: |
-          cd "$GITHUB_WORKSPACE"
+          cd services
           docker compose up -d --build
 
       - name: Show container status
         run: |
-          cd "$GITHUB_WORKSPACE"
+          cd services
           docker compose ps
 
       - name: Health check
@@ -76,7 +100,9 @@ jobs:
           attempt=0
 
           while [ $attempt -lt $max_attempts ]; do
-            if curl -fsS http://localhost:3001/api/schema/ > /dev/null; then
+            if curl -fsS http://localhost:3000/health > /dev/null \
+              && curl -fsS http://localhost:3000/core/health > /dev/null \
+              && curl -fsS http://localhost:3000/retry/health > /dev/null; then
               echo "Application is healthy"
               exit 0
             fi
@@ -87,6 +113,7 @@ jobs:
           done
 
           echo "Health check failed"
-          cd "$GITHUB_WORKSPACE"
-          docker compose logs --tail=120 web
+          cd services
+          docker compose logs --tail=120
           exit 1
+
