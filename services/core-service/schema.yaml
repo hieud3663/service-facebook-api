@@ -1,0 +1,365 @@
+openapi: 3.0.3
+info:
+  title: Core Service – Event Processing Pipeline
+  version: 1.0.0
+  description: 'Microservice: Kafka consumer, AI classification (Dify), spam detection,
+    and auto-moderation'
+paths:
+  /core/events:
+    get:
+      operationId: core_events_list
+      summary: List processed events
+      tags:
+      - core
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProcessedEvent'
+          description: ''
+  /core/events/{event_id}:
+    get:
+      operationId: core_events_retrieve
+      summary: Event detail with action logs
+      parameters:
+      - in: path
+        name: event_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - core
+      responses:
+        '200':
+          description: Event detail
+  /core/events/{event_id}/retry:
+    post:
+      operationId: core_events_retry_create
+      summary: Retry a failed event
+      parameters:
+      - in: path
+        name: event_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - core
+      responses:
+        '200':
+          description: Retry result
+  /core/health:
+    get:
+      operationId: core_health_retrieve
+      summary: Health check
+      tags:
+      - core
+      security:
+      - {}
+      responses:
+        '200':
+          description: OK
+  /core/metrics:
+    get:
+      operationId: core_metrics_retrieve
+      summary: Core service metrics
+      tags:
+      - core
+      responses:
+        '200':
+          description: Metrics
+  /core/reviews:
+    get:
+      operationId: core_reviews_list
+      summary: List manual review queue
+      tags:
+      - core
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ManualReview'
+          description: ''
+  /core/schema/:
+    get:
+      operationId: core_schema_retrieve
+      description: |-
+        OpenApi3 schema for this API. Format can be selected via content negotiation.
+
+        - YAML: application/vnd.oai.openapi
+        - JSON: application/vnd.oai.openapi+json
+      parameters:
+      - in: query
+        name: format
+        schema:
+          type: string
+          enum:
+          - json
+          - yaml
+      - in: query
+        name: lang
+        schema:
+          type: string
+          enum:
+          - af
+          - ar
+          - ar-dz
+          - ast
+          - az
+          - be
+          - bg
+          - bn
+          - br
+          - bs
+          - ca
+          - ckb
+          - cs
+          - cy
+          - da
+          - de
+          - dsb
+          - el
+          - en
+          - en-au
+          - en-gb
+          - eo
+          - es
+          - es-ar
+          - es-co
+          - es-mx
+          - es-ni
+          - es-ve
+          - et
+          - eu
+          - fa
+          - fi
+          - fr
+          - fy
+          - ga
+          - gd
+          - gl
+          - he
+          - hi
+          - hr
+          - hsb
+          - hu
+          - hy
+          - ia
+          - id
+          - ig
+          - io
+          - is
+          - it
+          - ja
+          - ka
+          - kab
+          - kk
+          - km
+          - kn
+          - ko
+          - ky
+          - lb
+          - lt
+          - lv
+          - mk
+          - ml
+          - mn
+          - mr
+          - ms
+          - my
+          - nb
+          - ne
+          - nl
+          - nn
+          - os
+          - pa
+          - pl
+          - pt
+          - pt-br
+          - ro
+          - ru
+          - sk
+          - sl
+          - sq
+          - sr
+          - sr-latn
+          - sv
+          - sw
+          - ta
+          - te
+          - tg
+          - th
+          - tk
+          - tr
+          - tt
+          - udm
+          - ug
+          - uk
+          - ur
+          - uz
+          - vi
+          - zh-hans
+          - zh-hant
+      tags:
+      - core
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/vnd.oai.openapi:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/yaml:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/vnd.oai.openapi+json:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+components:
+  schemas:
+    ManualReview:
+      type: object
+      properties:
+        event_id:
+          type: string
+        reason:
+          type: string
+        status:
+          type: string
+        reviewer_note:
+          type: string
+          default: ''
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - event_id
+      - reason
+      - status
+    ProcessedEvent:
+      type: object
+      properties:
+        event_id:
+          type: string
+        platform_event_id:
+          type: string
+          default: ''
+        source:
+          type: string
+        event_type:
+          type: string
+        channel:
+          type: string
+        page_id:
+          type: string
+        sender_id:
+          type: string
+          default: ''
+        actor_name:
+          type: string
+          default: ''
+        message_text:
+          type: string
+          default: ''
+        message_hash:
+          type: string
+          default: ''
+        intent:
+          type: string
+          default: ''
+        sentiment:
+          type: string
+          default: ''
+        is_spam:
+          type: boolean
+          default: false
+        is_malicious_link:
+          type: boolean
+          default: false
+        ai_confidence:
+          type: number
+          format: double
+          default: 0.0
+        ai_reason:
+          type: string
+          default: ''
+        ai_parse_error:
+          type: string
+          default: ''
+        spam_score:
+          type: integer
+          default: 0
+        spam_signals:
+          type: array
+          items:
+            type: string
+        spam_reason:
+          type: string
+          default: ''
+        detected_links:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        decision:
+          type: string
+          default: ''
+        decision_reason:
+          type: string
+          default: ''
+        error_message:
+          type: string
+          default: ''
+        retry_count:
+          type: integer
+          default: 0
+        last_failed_at:
+          type: string
+          format: date-time
+          nullable: true
+        occurred_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - channel
+      - created_at
+      - event_id
+      - event_type
+      - occurred_at
+      - page_id
+      - source
+      - status
+      - updated_at
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid

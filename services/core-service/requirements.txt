@@ -1,0 +1,13 @@
+# Core Framework
+Django
+djangorestframework
+drf-spectacular
+django-environ~=0.11.0
+python-dotenv
+gunicorn
+# Kafka
+kafka-python-ng
+# MongoDB (direct driver, no ORM wrapper)
+pymongo
+# HTTP client for Dify
+requests
