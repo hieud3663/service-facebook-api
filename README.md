@@ -27,10 +27,16 @@ Microservices-based backend for Facebook Page integration.
 | Service | Port | Description |
 |---------|------|-------------|
 | **Nginx** | 80 | API gateway – single entry-point |
-| **api-service** | 8000 | REST APIs for Facebook Page (Graph API) |
+| **api-service** | 3002 | REST APIs for Facebook Page (Graph API) |
+| **api-worker** | - | Consumes `reply_commands` and executes Facebook actions |
 | **webhook-service** | 3001 | Realtime webhook ingestion → Kafka |
+| **core-service** | 3003 | Consume `raw_events`, classify/spam-detect, publish `reply_commands` |
+| **core-worker** | - | Kafka worker for core event processing |
+| **core-retry-worker** | - | Kafka worker that consumes `send_retry` and reruns core processing |
+| **retry-service** | 3004 | Consume `send_failed`, publish `send_retry` or `dead_letter` |
+| **retry-worker** | - | Kafka worker for retry-service |
 | **Kafka** | 9092 | Event streaming broker |
-| **Zookeeper** | 2181 | Kafka coordination |
+| **MongoDB** | 27017 | Core business data store |
 
 ## Project Structure
 
@@ -48,14 +54,22 @@ services/
 │   ├── scripts/start.sh
 │   ├── config/                 # Django settings
 │   └── apps/facebook_api/     # Business logic
-└── webhook-service/            # Microservice 2
+├── webhook-service/            # Microservice 2
+│   ├── Dockerfile
+│   ├── manage.py
+│   ├── requirements.txt
+│   ├── .env / .env.example
+│   ├── scripts/start.sh
+│   ├── config/                 # Django settings
+│   └── apps/webhook/           # Business logic
+└── core-service/               # Microservice 3
     ├── Dockerfile
     ├── manage.py
     ├── requirements.txt
     ├── .env / .env.example
     ├── scripts/start.sh
     ├── config/                 # Django settings
-    └── apps/webhook/           # Business logic
+    └── apps/core/              # Kafka consumer, AI, spam, decisions
 ```
 
 ## Phase 1 – Preparation Checklist
@@ -144,6 +158,23 @@ To stream live events to your local machine, you need to expose your local Nginx
 | `raw_event` | Original Facebook payload |
 
 Kafka topic: `raw_events` (configurable via `KAFKA_RAW_EVENTS_TOPIC`).
+
+## Core Service Processing
+
+`core-worker` consumes `raw_events`, stores processing state in MongoDB, runs local spam detection and Dify AI classification, then publishes Facebook action commands to Kafka topic `reply_commands`. `api-worker` consumes `reply_commands`, calls Facebook Graph API, and publishes execution failures to `send_failed`.
+
+Main statuses:
+- `received`, `retrying`, `action_queued`, `ignored`, `review_pending`, `failed`, `send_failed`, `dlq_published`
+
+Failure handling:
+- transient failures are retried with backoff.
+- api-worker retryable failures are published to `send_failed`.
+- retry-service publishes `send_retry` while attempts remain.
+- core-retry-worker consumes `send_retry` and republishes the action to `reply_commands`.
+- exhausted failures are published to `dead_letter`.
+- manual retry endpoint: `POST /core/events/{event_id}/retry` with `X-Internal-Api-Key` when configured.
+
+See `CORE_RETRY_RUNBOOK.md` for the implemented retry topology and demo steps.
 
 ## Run with Docker (Microservices)
 
