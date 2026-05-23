@@ -1,0 +1,21 @@
+groups:
+  - name: kafka_alerts
+    rules:
+      - alert: DeadLetterQueueReceived
+        expr: increase(kafka_topic_partition_current_offset{topic="dead_letter"}[1m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Co message moi vao Dead Letter Queue"
+          description: "Topic dead_letter vua nhan them message. Kiem tra Kafka UI de xem noi dung."
+
+      - alert: KafkaConsumerLagHigh
+        expr: kafka_consumergroup_lag > 500
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer lag cao bat thuong"
+          description: "Consumer group {{ $labels.consumergroup }} dang lag {{ $value }} message."
+

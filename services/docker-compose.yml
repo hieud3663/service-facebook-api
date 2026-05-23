@@ -13,6 +13,8 @@ services:
     depends_on:
       - api-service
       - webhook-service
+      - core-service
+      - retry-service
     restart: unless-stopped
 
   # ─────────────────────────────────────────────
@@ -24,10 +26,25 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ./api-service/.env
+    environment:
+      API_RUN_MODE: web
     ports:
       - "3002:3002"
     expose:
       - "3002"
+    restart: unless-stopped
+
+  api-worker:
+    build:
+      context: ./api-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./api-service/.env
+    environment:
+      API_RUN_MODE: worker
+    depends_on:
+      kafka:
+        condition: service_healthy
     restart: unless-stopped
 
   # ─────────────────────────────────────────────
@@ -44,8 +61,105 @@ services:
     expose:
       - "3001"
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # Core Service  (Event processing pipeline)
+  # ─────────────────────────────────────────────
+  core-service:
+    build:
+      context: ./core-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./core-service/.env
+    environment:
+      CORE_RUN_MODE: web
+    ports:
+      - "3003:3003"
+    expose:
+      - "3003"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    restart: unless-stopped
+
+  core-worker:
+    build:
+      context: ./core-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./core-service/.env
+    environment:
+      CORE_RUN_MODE: worker
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # Infrastructure: MongoDB
+  # ─────────────────────────────────────────────
+  core-retry-worker:
+    build:
+      context: ./core-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./core-service/.env
+    environment:
+      CORE_RUN_MODE: retry-worker
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    restart: unless-stopped
+
+  retry-service:
+    build:
+      context: ./retry-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./retry-service/.env
+    environment:
+      RETRY_RUN_MODE: web
+    ports:
+      - "3004:3004"
+    expose:
+      - "3004"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    restart: unless-stopped
+
+  retry-worker:
+    build:
+      context: ./retry-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./retry-service/.env
+    environment:
+      RETRY_RUN_MODE: worker
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb_data:/data/db
 
   # ─────────────────────────────────────────────
   # Infrastructure: Apache Kafka (KRaft mode)
@@ -65,6 +179,12 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
 
   # ─────────────────────────────────────────────
   # Interactive UI for Kafka (Kafka-UI)
@@ -77,4 +197,44 @@ services:
       - KAFKA_CLUSTERS_0_NAME=LocalKafka
       - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    ports:
+      - "9308:9308"
+    command:
+      - "--kafka.server=kafka:9092"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    depends_on:
+      - kafka-exporter
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports:
+      - "9093:9093"
+    volumes:
+      - ../alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    depends_on:
+      - prometheus
+
+volumes:
+  mongodb_data:
+  prometheus_data:
