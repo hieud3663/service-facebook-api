@@ -74,22 +74,29 @@ class FacebookEventNormalizer:
         else:
             event_type = "unknown"
 
+        comment_id = value.get("comment_id", "")
+        post_id = value.get("post_id", "")
+
         return {
             "event_id": str(uuid.uuid4()),
+            "platform_event_id": comment_id or post_id or "",
             "source": "facebook",
             "object": payload_object,
             "event_type": event_type,
             "occurred_at": cls._to_iso8601(value.get("created_time")),
             "page_id": entry.get("id"),
             "sender_id": from_obj.get("id"),
-            "target_id": value.get("post_id") or value.get("comment_id"),
+            "actor_name": from_obj.get("name", ""),
+            "target_id": post_id or comment_id,
+            "post_id": post_id,
+            "comment_id": comment_id,
+            "parent_id": value.get("parent_id", ""),
+            "message_text": value.get("message", ""),
             "channel": "facebook_page",
             "meta": {
                 "field": field,
                 "item": item,
-                "verb": value.get("verb"),
-                "comment_id": value.get("comment_id"),
-                "parent_id": value.get("parent_id"),
+                "verb": value.get("verb", ""),
             },
             "raw_event": change,
         }
@@ -102,19 +109,26 @@ class FacebookEventNormalizer:
         message_event: dict[str, Any],
     ) -> dict[str, Any]:
         message_payload = message_event.get("message", {})
+        mid = message_payload.get("mid", "")
 
         return {
             "event_id": str(uuid.uuid4()),
+            "platform_event_id": mid,
             "source": "facebook",
             "object": payload_object,
             "event_type": "message",
             "occurred_at": cls._to_iso8601(message_event.get("timestamp")),
             "page_id": entry.get("id"),
             "sender_id": message_event.get("sender", {}).get("id"),
+            "actor_name": "",
             "target_id": message_event.get("recipient", {}).get("id"),
+            "post_id": "",
+            "comment_id": "",
+            "parent_id": "",
+            "message_text": message_payload.get("text", ""),
             "channel": "facebook_messenger",
             "meta": {
-                "mid": message_payload.get("mid"),
+                "mid": mid,
                 "is_echo": message_payload.get("is_echo", False),
             },
             "raw_event": message_event,
