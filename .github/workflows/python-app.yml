@@ -176,24 +176,35 @@ jobs:
 
           $COMPOSE build
           $COMPOSE up -d mongodb kafka
-          $COMPOSE run --rm api-service python manage.py migrate --noinput
-          $COMPOSE run --rm webhook-service python manage.py migrate --noinput
-          $COMPOSE run --rm core-service python manage.py migrate --noinput
-          $COMPOSE run --rm retry-service python manage.py migrate --noinput
-          $COMPOSE up -d --remove-orphans
+          $COMPOSE run --rm --no-deps api-service python manage.py migrate --noinput
+          $COMPOSE run --rm --no-deps webhook-service python manage.py migrate --noinput
+          $COMPOSE run --rm --no-deps core-service python manage.py migrate --noinput
+          $COMPOSE run --rm --no-deps retry-service python manage.py migrate --noinput
+          $COMPOSE up -d --remove-orphans \
+            mongodb \
+            kafka \
+            api-service \
+            api-worker \
+            webhook-service \
+            core-service \
+            core-worker \
+            core-retry-worker \
+            retry-service \
+            retry-worker \
+            nginx
           $COMPOSE ps
 
       - name: Health check
         run: |
           set -euo pipefail
 
-          max_attempts=18
+          max_attempts=24
           attempt=0
 
           while [ "$attempt" -lt "$max_attempts" ]; do
-            if curl -fsS http://localhost:3000/health >/dev/null \
-              && curl -fsS http://localhost:3000/core/health >/dev/null \
-              && curl -fsS http://localhost:3000/retry/health >/dev/null; then
+            if curl --max-time 5 -fsS http://localhost:3000/health >/dev/null \
+              && curl --max-time 5 -fsS http://localhost:3000/core/health >/dev/null \
+              && curl --max-time 5 -fsS http://localhost:3000/retry/health >/dev/null; then
               echo "Application is healthy"
               exit 0
             fi
