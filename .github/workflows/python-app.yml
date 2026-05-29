@@ -1,108 +1,199 @@
-name: CI/CD
+name: Deploy Backend
 
 on:
-  workflow_dispatch:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-backend-production
+  cancel-in-progress: true
+
+env:
+  COMPOSE_PROJECT_NAME: service-facebook-api
+  SERVICES_DIR: services
+  SERVICE_ENV_DIR: /opt/service-facebook-api/env
+
 jobs:
-  ci:
-    name: Django CI (${{ matrix.service }})
-    runs-on: self-hosted
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - api-service
-          - webhook-service
-          - core-service
-          - retry-service
+  deploy:
+    name: Deploy on VPS
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 30
 
     defaults:
       run:
-        working-directory: services/${{ matrix.service }}
+        shell: bash
 
     steps:
+      - name: Prepare runner workspace
+        run: |
+          set -euo pipefail
+
+          if [ -d "$GITHUB_WORKSPACE" ]; then
+            if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+              sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
+              sudo find "$GITHUB_WORKSPACE" -type d -name "__pycache__" -prune -exec rm -rf {} +
+              sudo find "$GITHUB_WORKSPACE" -type f -name "*.pyc" -delete
+              sudo rm -rf "$GITHUB_WORKSPACE/logs"
+            else
+              chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+              find "$GITHUB_WORKSPACE" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+              find "$GITHUB_WORKSPACE" -type f -name "*.pyc" -delete 2>/dev/null || true
+              rm -rf "$GITHUB_WORKSPACE/logs" 2>/dev/null || true
+            fi
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          clean: false
 
-      - name: Install dependencies
+      - name: Load service environment files
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          set -euo pipefail
 
-      - name: Django check
-        run: python manage.py check
+          ENV_DIR="${SERVICE_FACEBOOK_ENV_DIR:-${SERVICE_ENV_DIR}}"
+          API_ENV_FILE_PATH="${API_SERVICE_ENV_FILE_PATH:-$ENV_DIR/api-service.env}"
+          WEBHOOK_ENV_FILE_PATH="${WEBHOOK_SERVICE_ENV_FILE_PATH:-$ENV_DIR/webhook-service.env}"
+          CORE_ENV_FILE_PATH="${CORE_SERVICE_ENV_FILE_PATH:-$ENV_DIR/core-service.env}"
+          RETRY_ENV_FILE_PATH="${RETRY_SERVICE_ENV_FILE_PATH:-$ENV_DIR/retry-service.env}"
 
-      - name: Run migrations
-        run: python manage.py migrate --noinput
+          copy_private_file() {
+            source_path="$1"
+            target_path="$2"
 
-      - name: Run tests
-        run: python manage.py test
+            if [ ! -f "$source_path" ]; then
+              echo "::error::Missing environment file on VPS: $source_path"
+              exit 1
+            fi
 
-      - name: Validate OpenAPI schema
-        if: matrix.service != 'webhook-service'
-        run: python manage.py spectacular --file schema.yaml --validate
+            mkdir -p "$(dirname "$target_path")"
 
-  compose:
-    name: Docker Compose Validation
-    runs-on: self-hosted
-    needs: ci
+            if [ -r "$source_path" ]; then
+              install -m 600 "$source_path" "$target_path"
+              return
+            fi
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+            if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+              sudo install -m 600 -o "$(id -u)" -g "$(id -g)" "$source_path" "$target_path"
+              return
+            fi
 
-      - name: Compose config
+            echo "::error::Runner user cannot read $source_path. Grant read permission or allow passwordless sudo."
+            exit 1
+          }
+
+          copy_private_file "$API_ENV_FILE_PATH" "$SERVICES_DIR/api-service/.env"
+          copy_private_file "$WEBHOOK_ENV_FILE_PATH" "$SERVICES_DIR/webhook-service/.env"
+          copy_private_file "$CORE_ENV_FILE_PATH" "$SERVICES_DIR/core-service/.env"
+          copy_private_file "$RETRY_ENV_FILE_PATH" "$SERVICES_DIR/retry-service/.env"
+
+      - name: Check Docker
         run: |
-          cd services
-          docker compose config
+          set -euo pipefail
 
-  deploy:
-    name: Deploy on VPS (Self-hosted)
-    runs-on: self-hosted
-    needs: compose
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            DOCKER="docker"
+          elif command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+            DOCKER="sudo docker"
+          else
+            echo "::error::Docker is not installed or the runner user cannot access it. Add the runner user to the docker group or allow passwordless sudo for docker."
+            exit 1
+          fi
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+          if $DOCKER compose version >/dev/null 2>&1; then
+            exit 0
+          fi
 
-      - name: Stop existing containers
+          if command -v docker-compose >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            docker-compose version >/dev/null
+            exit 0
+          fi
+
+          if command -v sudo >/dev/null 2>&1 && sudo -n docker-compose version >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          echo "::error::Docker Compose not found. Install the Docker Compose plugin or docker-compose."
+          exit 1
+
+      - name: Validate Docker Compose config
         run: |
-          cd services
-          docker compose down --remove-orphans || true
+          set -euo pipefail
 
-      - name: Build and start services
-        run: |
-          cd services
-          docker compose up -d --build
+          cd "$SERVICES_DIR"
 
-      - name: Show container status
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            DOCKER="docker"
+          elif command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+            DOCKER="sudo docker"
+          else
+            echo "::error::Runner user cannot access Docker."
+            exit 1
+          fi
+
+          if $DOCKER compose version >/dev/null 2>&1; then
+            COMPOSE="$DOCKER compose"
+          elif command -v docker-compose >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            COMPOSE="docker-compose"
+          elif command -v sudo >/dev/null 2>&1 && sudo -n docker-compose version >/dev/null 2>&1; then
+            COMPOSE="sudo docker-compose"
+          else
+            echo "::error::Docker Compose not found or cannot access Docker."
+            exit 1
+          fi
+
+          $COMPOSE config >/dev/null
+
+      - name: Deploy with Docker Compose
         run: |
-          cd services
-          docker compose ps
+          set -euo pipefail
+
+          cd "$SERVICES_DIR"
+
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            DOCKER="docker"
+          elif command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+            DOCKER="sudo docker"
+          else
+            echo "::error::Runner user cannot access Docker. Add it to the docker group or allow passwordless sudo for docker."
+            exit 1
+          fi
+
+          if $DOCKER compose version >/dev/null 2>&1; then
+            COMPOSE="$DOCKER compose"
+          elif command -v docker-compose >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            COMPOSE="docker-compose"
+          elif command -v sudo >/dev/null 2>&1 && sudo -n docker-compose version >/dev/null 2>&1; then
+            COMPOSE="sudo docker-compose"
+          else
+            echo "::error::Docker Compose not found or cannot access Docker."
+            exit 1
+          fi
+
+          $COMPOSE build
+          $COMPOSE up -d mongodb kafka
+          $COMPOSE run --rm api-service python manage.py migrate --noinput
+          $COMPOSE run --rm webhook-service python manage.py migrate --noinput
+          $COMPOSE run --rm core-service python manage.py migrate --noinput
+          $COMPOSE run --rm retry-service python manage.py migrate --noinput
+          $COMPOSE up -d --remove-orphans
+          $COMPOSE ps
 
       - name: Health check
         run: |
-          max_attempts=12
+          set -euo pipefail
+
+          max_attempts=18
           attempt=0
 
-          while [ $attempt -lt $max_attempts ]; do
-            if curl -fsS http://localhost:3000/health > /dev/null \
-              && curl -fsS http://localhost:3000/core/health > /dev/null \
-              && curl -fsS http://localhost:3000/retry/health > /dev/null; then
+          while [ "$attempt" -lt "$max_attempts" ]; do
+            if curl -fsS http://localhost:3000/health >/dev/null \
+              && curl -fsS http://localhost:3000/core/health >/dev/null \
+              && curl -fsS http://localhost:3000/retry/health >/dev/null; then
               echo "Application is healthy"
               exit 0
             fi
@@ -112,8 +203,38 @@ jobs:
             sleep 5
           done
 
-          echo "Health check failed"
-          cd services
-          docker compose logs --tail=120
+          echo "::error::Health check failed"
+
+          cd "$SERVICES_DIR"
+
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            DOCKER="docker"
+          elif command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+            DOCKER="sudo docker"
+          else
+            exit 1
+          fi
+
+          if $DOCKER compose version >/dev/null 2>&1; then
+            COMPOSE="$DOCKER compose"
+          elif command -v docker-compose >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            COMPOSE="docker-compose"
+          elif command -v sudo >/dev/null 2>&1 && sudo -n docker-compose version >/dev/null 2>&1; then
+            COMPOSE="sudo docker-compose"
+          else
+            exit 1
+          fi
+
+          $COMPOSE ps || true
+          $COMPOSE logs --tail=120 || true
           exit 1
+
+      - name: Cleanup Docker images
+        if: always()
+        run: |
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            docker image prune -f
+          elif command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+            sudo docker image prune -f
+          fi
 
