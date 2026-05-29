@@ -174,13 +174,21 @@ jobs:
             exit 1
           fi
 
-          $COMPOSE build
+          export COMPOSE_BAKE=false
+          export DOCKER_BUILDKIT=0
+
+          $COMPOSE build api-service
+          $COMPOSE build webhook-service
+          $COMPOSE build core-service
+          $COMPOSE build retry-service
+          $COMPOSE build nginx
+
           $COMPOSE up -d mongodb kafka
           $COMPOSE run --rm --no-deps api-service python manage.py migrate --noinput
           $COMPOSE run --rm --no-deps webhook-service python manage.py migrate --noinput
           $COMPOSE run --rm --no-deps core-service python manage.py migrate --noinput
           $COMPOSE run --rm --no-deps retry-service python manage.py migrate --noinput
-          $COMPOSE up -d --remove-orphans \
+          $COMPOSE up -d --no-build --remove-orphans \
             mongodb \
             kafka \
             api-service \
