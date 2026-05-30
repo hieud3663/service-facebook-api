@@ -1,6 +1,7 @@
 """Process asynchronous Facebook action commands from Kafka."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -11,6 +12,8 @@ from .services import FacebookGraphService, FacebookServiceError
 
 RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 NON_RETRYABLE_STATUS_CODES = {400, 401, 403, 404, 422}
+
+logger = logging.getLogger(__name__)
 
 
 class Publisher(Protocol):
@@ -45,14 +48,28 @@ class ReplyCommandProcessor:
         normalized = self._validate(command)
         service = self.service or self.service_class()
         command_id = normalized["command_id"]
+        logger.info(
+            "Processing reply command command_id=%s action=%s event_id=%s",
+            command_id,
+            normalized.get("action_type", ""),
+            normalized.get("event_id", ""),
+        )
 
         try:
             response = self._execute(service, normalized)
         except FacebookServiceError as exc:
             failure_payload = self._build_failure_payload(normalized, exc)
             self.publisher.publish(settings.KAFKA_SEND_FAILED_TOPIC, failure_payload)
+            logger.warning(
+                "Reply command failed and was published to %s command_id=%s status=%s error=%s",
+                settings.KAFKA_SEND_FAILED_TOPIC,
+                command_id,
+                exc.status_code,
+                exc.message,
+            )
             return CommandResult(status="failed_published", command_id=command_id, error=exc.message)
 
+        logger.info("Reply command succeeded command_id=%s action=%s", command_id, normalized.get("action_type", ""))
         return CommandResult(status="success", command_id=command_id, response=response)
 
     @staticmethod

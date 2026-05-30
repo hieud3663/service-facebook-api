@@ -56,16 +56,30 @@ class Command(BaseCommand):
                 if not messages:
                     continue
 
+                total_records = sum(len(records) for records in messages.values())
+                logger.info("Polled %d send_retry records", total_records)
                 for _tp, records in messages.items():
                     for record in records:
                         command = record.value
                         if command is None:
                             logger.warning("Skipping invalid send_retry record at offset %s", record.offset)
                             continue
+                        logger.info(
+                            "Consuming send_retry offset=%s command_id=%s event_id=%s",
+                            record.offset,
+                            command.get("command_id", ""),
+                            command.get("event_id", "")[:8],
+                        )
                         event = self._extract_event(command)
                         event["_retry_count"] = int(command.get("retry_count", 0) or 0)
                         event["_max_retries"] = int(command.get("max_retries", settings.KAFKA_MAX_RETRIES) or 0)
                         result = processor.process(event, force_retry=True)
+                        logger.info(
+                            "Processed send_retry command_id=%s event_id=%s status=%s",
+                            command.get("command_id", ""),
+                            event.get("event_id", "")[:8],
+                            result.get("status", ""),
+                        )
                         if result.get("status") == "failed":
                             payload = build_failure_payload(
                                 event,
@@ -142,3 +156,4 @@ class Command(BaseCommand):
         future = producer.send(topic, payload)
         future.get(timeout=10)
         producer.flush()
+        logger.warning("Published retry failure for event %s to %s", payload.get("event_id", "")[:8], topic)

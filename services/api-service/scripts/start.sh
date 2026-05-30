@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -e
+export PYTHONUNBUFFERED=1
 
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
@@ -9,7 +10,7 @@ case "${API_RUN_MODE:-web}" in
     exec python manage.py consume_reply_commands
     ;;
   web)
-    exec gunicorn config.wsgi:application --bind 0.0.0.0:3002 --workers 3 --timeout 120
+    exec gunicorn config.wsgi:application --bind 0.0.0.0:3002 --workers 3 --timeout 120 --access-logfile - --error-logfile - --log-level "${LOG_LEVEL:-info}"
     ;;
   *)
     echo "Unknown API_RUN_MODE=${API_RUN_MODE}" >&2

@@ -1,232 +1,376 @@
 # service-facebook-api
 
-Microservices-based backend for Facebook Page integration.
+Microservices backend for Facebook Page integration. The system receives Facebook
+webhooks, normalizes events, processes moderation decisions, executes Facebook
+Graph API actions, retries transient failures, and exposes monitoring/alerting
+for the Kafka pipeline.
 
 ## Architecture
 
-```
-                  ┌──────────┐
-   Client ──────► │  Nginx   │ :80
-                  │ Gateway  │
-                  └────┬─────┘
-                       │
-          ┌────────────┼────────────┐
-          │                         │
-    /api/* │                   /webhook* │
-          ▼                         ▼
-  ┌──────────────┐         ┌───────────────┐
-  │  api-service │ :8000   │webhook-service│ :3001
-  │  (Graph API) │         │ (Kafka ingest)│
-  └──────────────┘         └───────┬───────┘
-                                   │
-                              ┌────▼────┐
-                              │  Kafka  │ :9092
-                              └─────────┘
-```
+```text
+Client / Meta Webhook
+        |
+        v
+Nginx gateway :3000
+        |
+        +-- /api/*      -> api-service :3002
+        +-- /webhook*   -> webhook-service :3001
+        +-- /core/*     -> core-service :3003
+        +-- /retry/*    -> retry-service :3004
 
-| Service | Port | Description |
-|---------|------|-------------|
-| **Nginx** | 80 | API gateway – single entry-point |
-| **api-service** | 3002 | REST APIs for Facebook Page (Graph API) |
-| **api-worker** | - | Consumes `reply_commands` and executes Facebook actions |
-| **webhook-service** | 3001 | Realtime webhook ingestion → Kafka |
-| **core-service** | 3003 | Consume `raw_events`, classify/spam-detect, publish `reply_commands` |
-| **core-worker** | - | Kafka worker for core event processing |
-| **core-retry-worker** | - | Kafka worker that consumes `send_retry` and reruns core processing |
-| **retry-service** | 3004 | Consume `send_failed`, publish `send_retry` or `dead_letter` |
-| **retry-worker** | - | Kafka worker for retry-service |
-| **Kafka** | 9092 | Event streaming broker |
-| **MongoDB** | 27017 | Core business data store |
+webhook-service -> Kafka topic raw_events
+core-worker     -> consumes raw_events -> MongoDB -> Kafka topic reply_commands
+api-worker      -> consumes reply_commands -> Facebook Graph API
+api-worker      -> publishes failures to send_failed
+retry-worker    -> consumes send_failed -> send_retry or dead_letter
+core-retry-worker -> consumes send_retry -> reruns core action flow
 
-## Project Structure
-
-```
-services/
-├── docker-compose.yml          # Orchestrates all services
-├── nginx/
-│   ├── Dockerfile
-│   └── nginx.conf              # API gateway routing
-├── api-service/                # Microservice 1
-│   ├── Dockerfile
-│   ├── manage.py
-│   ├── requirements.txt
-│   ├── .env / .env.example
-│   ├── scripts/start.sh
-│   ├── config/                 # Django settings
-│   └── apps/facebook_api/     # Business logic
-├── webhook-service/            # Microservice 2
-│   ├── Dockerfile
-│   ├── manage.py
-│   ├── requirements.txt
-│   ├── .env / .env.example
-│   ├── scripts/start.sh
-│   ├── config/                 # Django settings
-│   └── apps/webhook/           # Business logic
-└── core-service/               # Microservice 3
-    ├── Dockerfile
-    ├── manage.py
-    ├── requirements.txt
-    ├── .env / .env.example
-    ├── scripts/start.sh
-    ├── config/                 # Django settings
-    └── apps/core/              # Kafka consumer, AI, spam, decisions
+Kafka exporter -> Prometheus -> Alertmanager -> Email
 ```
 
-## Phase 1 – Preparation Checklist
+## Services
 
-### 1) Create Facebook Page
-- Create a Page in Facebook.
-- Save evidence screenshot including:
-  - Page name
-  - Page ID
+| Service | Host port | Purpose |
+| --- | ---: | --- |
+| `nginx` | `3000` | Single gateway for API, webhook, core, retry routes |
+| `api-service` | `3002` | Facebook Graph API REST wrapper |
+| `api-worker` | - | Executes async Facebook action commands from `reply_commands` |
+| `webhook-service` | `3001` | Facebook webhook verification and Kafka ingestion |
+| `core-service` | `3003` | Core event state, health, metrics, manual review APIs |
+| `core-worker` | - | Consumes `raw_events` and decides moderation actions |
+| `core-retry-worker` | - | Consumes `send_retry` and reruns core processing |
+| `retry-service` | `3004` | Retry health, metrics, and retry attempt APIs |
+| `retry-worker` | - | Consumes `send_failed`, publishes `send_retry` or `dead_letter` |
+| `mongodb` | `27018` | MongoDB data store, mapped to container port `27017` |
+| `kafka` | `9092` | Apache Kafka broker in KRaft mode |
+| `kafka-ui` | `8080` | Kafka topic/browser UI |
+| `kafka-exporter` | `9308` | Kafka metrics exporter |
+| `prometheus` | `9090` | Metrics and alert rules |
+| `alertmanager` | `9093` | Email alert routing |
 
-### 2) Create Facebook App (Meta Developer)
-- Go to Meta for Developers and create an app.
-- Add required product(s): usually `Facebook Login` and permissions for Page access.
-- Save evidence screenshot including:
-  - App Dashboard (App ID visible)
+## Repository Layout
 
-### 3) Get Page Access Token
-- Generate a Page Access Token for the target page.
-- Ensure permissions are granted (depending on endpoint use):
-  - `pages_show_list`
-  - `pages_read_engagement`
-  - `pages_manage_posts`
-  - `pages_read_user_content`
-  - `pages_manage_engagement`
-  - `read_insights`
-- Save evidence screenshot including:
-  - token value (or partially masked)
-  - permissions list
+```text
+.
+|-- services/
+|   |-- docker-compose.yml
+|   |-- nginx/
+|   |-- api-service/
+|   |-- webhook-service/
+|   |-- core-service/
+|   `-- retry-service/
+|-- prometheus/
+|   |-- prometheus.yml
+|   `-- alert.rules.yml
+|-- alertmanager/
+|   |-- Dockerfile
+|   |-- alertmanager.yml
+|   |-- entrypoint.sh
+|   `-- README.md
+`-- .github/workflows/python-app.yml
+```
 
-Put token and app/page config into each service's `.env` (copy from `.env.example`).
+## Prerequisites
 
-### 4) Webhook Setup on Meta App Dashboard
-To stream live events to your local machine, you need to expose your local Nginx gateway (port 3000) to the internet and configure Facebook Webhook.
+- Docker and Docker Compose plugin
+- Meta/Facebook app and Page access token
+- Ngrok or another public tunnel for local webhook testing
+- Optional: Gmail App Password for Alertmanager email alerts
 
-1. **Expose local port using Ngrok**:
-   ```bash
-   ngrok http 3000
-   ```
-   *Copy the generated `https://...ngrok-free.app` URL.*
+## Environment Files
 
-2. **Setup Webhook Product**:
-   - In Meta App Dashboard, click **Add Product** and select **Webhooks**.
-   - Choose **Page** from the dropdown and click **Subscribe to this object**.
-   - **Callback URL**: Enter `https://<your-ngrok-url>/webhook`
-   - **Verify Token**: Enter the text you wrote in your `.env` for `FACEBOOK_WEBHOOK_VERIFY_TOKEN` (e.g. `your-webhook-verify-token`).
-   - Click **Verify and Save**. (Make sure your Docker services are running!)
+Docker Compose expects these files:
 
-3. **Subscribe to Webhook Fields**:
-   - Under Page webhooks, find the `feed` and `messages` fields and click **Subscribe**.
-   - Alternatively, use the `POST /webhook/subscriptions/comments` API provided in this service to programmatically subscribe the Page using the API.
+```text
+.env
+services/api-service/.env
+services/webhook-service/.env
+services/core-service/.env
+services/retry-service/.env
+```
 
-## Phase 2 – API Service Endpoints
+Use the existing examples as a starting point:
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET`  | `/api/page/{pageId}` | Page detail |
-| `GET`  | `/api/page/{pageId}/posts` | List posts |
-| `POST` | `/api/page/{pageId}/posts` | Create post |
-| `DELETE`| `/api/page/post/{postId}` | Delete post |
-| `GET`  | `/api/page/post/{postId}/comments` | Post comments |
-| `GET`  | `/api/page/post/{postId}/likes` | Post likes |
-| `GET`  | `/api/page/{pageId}/insights` | Page insights |
+```bash
+cp .env.example .env
+cp services/api-service/.env.example services/api-service/.env
+cp services/webhook-service/.env.example services/webhook-service/.env
+cp services/core-service/.env.example services/core-service/.env
+cp services/retry-service/.env.example services/retry-service/.env
+```
 
-## Phase 4 – Webhook Service Endpoints
+Important variables:
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET`  | `/webhook` | Facebook webhook verification (`hub.challenge`) |
-| `POST` | `/webhook` | Verify signature, normalize payload, publish to Kafka |
-| `POST` | `/webhook/subscriptions/comments` | Register Page subscription (`feed`) |
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `FACEBOOK_GRAPH_API_VERSION` | api, webhook | Graph API version, for example `v22.0` |
+| `FACEBOOK_PAGE_ACCESS_TOKEN` | api, webhook | Page access token |
+| `FACEBOOK_WEBHOOK_VERIFY_TOKEN` | webhook | Verify token configured in Meta dashboard |
+| `FACEBOOK_WEBHOOK_SECRET` | webhook | App secret for `X-Hub-Signature-256` validation |
+| `DIFY_API_URL`, `DIFY_API_KEY` | core | Optional AI classification integration |
+| `CORE_INTERNAL_API_KEY` | core | Protects core internal endpoints when configured |
+| `RETRY_INTERNAL_API_KEY` | retry | Protects retry internal endpoints when configured |
+| `KAFKA_BOOTSTRAP_SERVERS` | all workers | Use `kafka:9092` in Docker |
+| `LOG_LEVEL` | all Django services | Console log level, default `INFO` |
+| `LOG_FORMAT` | all Django services | Optional Python logging format |
+| `ALERTMANAGER_*` | alertmanager | SMTP sender and recipient settings |
 
-### Normalized Event Schema
-
-| Field | Description |
-|-------|-------------|
-| `event_id` | UUID for each normalized event |
-| `source` | Always `"facebook"` |
-| `object` | Payload object type |
-| `event_type` | `"comment"`, `"message"`, or `"unknown"` |
-| `occurred_at` | ISO 8601 timestamp |
-| `page_id` | Facebook Page ID |
-| `sender_id` | Who triggered the event |
-| `target_id` | Target post/comment ID |
-| `channel` | `"facebook_page"` or `"facebook_messenger"` |
-| `meta` | Additional event metadata |
-| `raw_event` | Original Facebook payload |
-
-Kafka topic: `raw_events` (configurable via `KAFKA_RAW_EVENTS_TOPIC`).
-
-## Core Service Processing
-
-`core-worker` consumes `raw_events`, stores processing state in MongoDB, runs local spam detection and Dify AI classification, then publishes Facebook action commands to Kafka topic `reply_commands`. `api-worker` consumes `reply_commands`, calls Facebook Graph API, and publishes execution failures to `send_failed`.
-
-Main statuses:
-- `received`, `retrying`, `action_queued`, `ignored`, `review_pending`, `failed`, `send_failed`, `dlq_published`
-
-Failure handling:
-- transient failures are retried with backoff.
-- api-worker retryable failures are published to `send_failed`.
-- retry-service publishes `send_retry` while attempts remain.
-- core-retry-worker consumes `send_retry` and republishes the action to `reply_commands`.
-- exhausted failures are published to `dead_letter`.
-- manual retry endpoint: `POST /core/events/{event_id}/retry` with `X-Internal-Api-Key` when configured.
-
-See `CORE_RETRY_RUNBOOK.md` for the implemented retry topology and demo steps.
-
-## Run with Docker (Microservices)
+## Run with Docker
 
 ```bash
 cd services
-docker compose up --build
+docker compose up -d --build
 ```
 
-Services will be available at:
-- **Gateway**: `http://localhost` (port 80)
-- **API docs**: `http://localhost/api/docs/swagger/`
-- **Webhook**: `http://localhost/webhook`
-- **Kafka broker**: `localhost:9092`
+Check containers:
 
-## Run locally (Single service)
+```bash
+docker compose ps
+```
+
+Main URLs:
+
+| URL | Description |
+| --- | --- |
+| `http://localhost:3000/health` | Gateway health |
+| `http://localhost:3000/api/docs/swagger/` | API service Swagger UI |
+| `http://localhost:3000/api/docs/redoc/` | API service ReDoc |
+| `http://localhost:3000/webhook` | Facebook webhook endpoint |
+| `http://localhost:3000/core/health` | Core health |
+| `http://localhost:3000/retry/health` | Retry health |
+| `http://localhost:8080` | Kafka UI |
+| `http://localhost:9090` | Prometheus |
+| `http://localhost:9093` | Alertmanager |
+
+Stop the stack:
+
+```bash
+cd services
+docker compose down
+```
+
+## Docker Logs
+
+All Django services and workers log to stdout/stderr for Docker. Gunicorn access
+logs are also enabled.
+
+Useful commands:
+
+```bash
+cd services
+docker compose logs -f webhook-service
+docker compose logs -f api-service api-worker
+docker compose logs -f core-service core-worker core-retry-worker
+docker compose logs -f retry-service retry-worker
+docker compose logs -f prometheus alertmanager
+```
+
+Increase verbosity by setting `LOG_LEVEL=DEBUG` in the relevant service `.env`
+file, then rebuild/recreate the container:
+
+```bash
+cd services
+docker compose up -d --build api-service api-worker
+```
+
+## Facebook Setup
+
+1. Create a Facebook Page and save the Page ID.
+2. Create a Meta Developer app.
+3. Generate a Page Access Token with the permissions required by the endpoints
+   you use, commonly:
+   - `pages_show_list`
+   - `pages_read_engagement`
+   - `pages_manage_posts`
+   - `pages_read_user_content`
+   - `pages_manage_engagement`
+   - `read_insights`
+4. Fill the `.env` files with token/app/webhook values.
+5. Expose the local gateway:
+
+```bash
+ngrok http 3000
+```
+
+6. In Meta Webhooks, choose object `Page`:
+   - Callback URL: `https://<ngrok-domain>/webhook`
+   - Verify token: value of `FACEBOOK_WEBHOOK_VERIFY_TOKEN`
+7. Subscribe the Page to webhook fields such as `feed` and `messages`.
+
+The webhook service also provides:
+
+```http
+POST /webhook/subscriptions/comments
+```
+
+to subscribe the page to `feed` programmatically.
+
+## API Endpoints
+
+All paths below are through the gateway at `http://localhost:3000`.
+
+### API Service
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/page/{page_id}` | Page detail |
+| `GET` | `/api/page/{page_id}/posts` | List page posts |
+| `POST` | `/api/page/{page_id}/posts` | Create page post |
+| `DELETE` | `/api/page/post/{post_id}` | Delete post |
+| `GET` | `/api/page/post/{post_id}/comments` | List post comments |
+| `GET` | `/api/page/post/{post_id}/likes` | List post likes |
+| `GET` | `/api/page/{page_id}/insights` | Page insights |
+| `POST` | `/api/page/comment/{comment_id}/hide` | Hide or unhide comment |
+| `POST` | `/api/page/comment/{comment_id}/replies` | Reply to comment |
+| `POST` | `/api/page/{page_id}/messages` | Send Messenger message |
+
+### Webhook Service
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/webhook` | Facebook webhook verification |
+| `POST` | `/webhook` | Verify signature, normalize payload, publish `raw_events` |
+| `POST` | `/webhook/subscriptions/comments` | Subscribe Page comment/feed events |
+
+### Core Service
+
+Internal endpoints use `X-Internal-Api-Key` when `CORE_INTERNAL_API_KEY` is set.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/core/health` | Core health check |
+| `GET` | `/core/metrics` | Processed event metrics |
+| `GET` | `/core/events` | List processed events |
+| `GET` | `/core/events/{event_id}` | Event detail with actions/reviews |
+| `POST` | `/core/events/{event_id}/retry` | Manual retry for a failed event |
+| `GET` | `/core/reviews` | Manual review queue |
+
+### Retry Service
+
+Internal endpoints use `X-Retry-Internal-Api-Key` when
+`RETRY_INTERNAL_API_KEY` is set.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/retry/health` | Retry health check |
+| `GET` | `/retry/metrics` | Retry attempt metrics |
+| `GET` | `/retry/attempts` | List retry attempts |
+| `GET` | `/retry/attempts/{command_id}` | Retry attempt detail |
+
+## Kafka Topics
+
+| Topic | Producer | Consumer | Purpose |
+| --- | --- | --- | --- |
+| `raw_events` | webhook-service | core-worker | Normalized Facebook events |
+| `reply_commands` | core-worker | api-worker | Facebook actions to execute |
+| `send_failed` | api-worker, core-worker | retry-worker | Retryable/failed action messages |
+| `send_retry` | retry-worker | core-retry-worker | Scheduled retry commands |
+| `dead_letter` | retry-worker | monitoring/manual review | Exhausted or non-retryable failures |
+
+## Processing Statuses
+
+Core event statuses:
+
+- `received`
+- `retrying`
+- `action_queued`
+- `ignored`
+- `review_pending`
+- `failed`
+- `send_failed`
+- `dlq_published`
+
+Retry outcomes:
+
+- `scheduled`
+- `dead_lettered`
+- `skipped`
+
+See `CORE_RETRY_RUNBOOK.md` for the implemented retry topology and demo steps.
+
+## Monitoring and Alerts
+
+Prometheus loads:
+
+- `prometheus/prometheus.yml`
+- `prometheus/alert.rules.yml`
+
+Alertmanager loads:
+
+- `alertmanager/alertmanager.yml`
+- root `.env` values named `ALERTMANAGER_*`
+
+Current alerting focus:
+
+- `DeadLetterQueueReceived`: critical alert when the `dead_letter` topic receives messages
+- `KafkaConsumerLagHigh`: warning for high consumer lag
+- `WebhookReceiverSilent`: warning when webhook ingestion is silent
+
+See `alertmanager/README.md` for Gmail App Password setup and manual alert tests.
+
+## Local Development
+
+Run a single service without Docker:
 
 ```bash
 cd services/api-service
 pip install -r requirements.txt
-cp .env.example .env   # fill values
+cp .env.example .env
 python manage.py migrate
-python manage.py runserver 8000
+python manage.py runserver 3002
 ```
+
+Run service checks:
 
 ```bash
-cd services/webhook-service
-pip install -r requirements.txt
-cp .env.example .env   # fill values
-python manage.py migrate
-python manage.py runserver 3001
+cd services/api-service
+python manage.py check
+python manage.py test
 ```
 
-## API docs
+Repeat from the desired service directory:
 
-Via Nginx gateway:
-- Schema: `GET /api/schema/`
-- Swagger UI: `GET /api/docs/swagger/`
-- ReDoc: `GET /api/docs/redoc/`
+- `services/webhook-service`
+- `services/api-service`
+- `services/core-service`
+- `services/retry-service`
 
-## GitHub Actions CI/CD
+## CI/CD
 
-Workflow file: `.github/workflows/ci-cd.yml`
+Workflow file:
 
-Pipeline behavior:
-- CI on pull request and push to `main`/`master`:
-  - install dependencies
-  - `python manage.py check`
-  - `python manage.py migrate --noinput`
-  - `python manage.py test`
-  - `python manage.py spectacular --file schema.yaml --validate`
-- CD on push to `main`:
-  - build Docker image
-  - push to GitHub Container Registry: `ghcr.io/<owner>/<repo>`
+```text
+.github/workflows/python-app.yml
+```
 
-No extra secret is required for GHCR publish in the same repository because workflow uses `GITHUB_TOKEN` with `packages: write` permission.
+The workflow deploys on push to `main` using a self-hosted Linux runner. It:
+
+1. Cleans runner workspace artifacts.
+2. Checks out the repository.
+3. Copies private environment files from `/opt/service-facebook-api/env`.
+4. Validates Docker and Docker Compose.
+5. Builds and deploys the Docker Compose stack.
+6. Runs gateway, core, and retry health checks.
+7. Prunes unused Docker images.
+
+Expected environment files on the VPS:
+
+```text
+/opt/service-facebook-api/env/root.env
+/opt/service-facebook-api/env/api-service.env
+/opt/service-facebook-api/env/webhook-service.env
+/opt/service-facebook-api/env/core-service.env
+/opt/service-facebook-api/env/retry-service.env
+```
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| No application logs in Docker | Ensure containers were rebuilt after code changes and check `LOG_LEVEL` |
+| Facebook webhook verification fails | Verify callback URL, token, and gateway route `/webhook` |
+| Webhook POST returns 401 | Check `FACEBOOK_WEBHOOK_SECRET` and Meta app secret |
+| Kafka workers do not process messages | Check Kafka health, topic names, and worker logs |
+| API actions fail | Check `FACEBOOK_PAGE_ACCESS_TOKEN` permissions and api-worker logs |
+| Retry never happens | Check `send_failed`, `retry-worker`, and `core-retry-worker` logs |
+| Email alerts do not send | Check root `.env` `ALERTMANAGER_*` values and `alertmanager` logs |

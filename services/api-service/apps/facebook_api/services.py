@@ -1,11 +1,14 @@
 from dataclasses import dataclass
 import json
+import logging
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -48,8 +51,15 @@ class FacebookGraphService:
         request = Request(url=url, data=encoded_body, method=method)
 
         try:
+            logger.info("Facebook Graph request method=%s endpoint=%s", method, endpoint)
             with urlopen(request, timeout=30) as response:
                 payload = response.read().decode("utf-8")
+                logger.info(
+                    "Facebook Graph response method=%s endpoint=%s status=%s",
+                    method,
+                    endpoint,
+                    response.status,
+                )
                 return json.loads(payload) if payload else {}
         except HTTPError as exc:
             raw = exc.read().decode("utf-8")
@@ -59,8 +69,21 @@ class FacebookGraphService:
             except json.JSONDecodeError:
                 details = {"raw": raw}
             message = details.get("error", {}).get("message", "Facebook API error")
+            logger.warning(
+                "Facebook Graph HTTP error method=%s endpoint=%s status=%s message=%s",
+                method,
+                endpoint,
+                exc.code,
+                message,
+            )
             raise FacebookServiceError(message=message, status_code=exc.code, details=details) from exc
         except URLError as exc:
+            logger.warning(
+                "Facebook Graph connection error method=%s endpoint=%s reason=%s",
+                method,
+                endpoint,
+                exc.reason,
+            )
             raise FacebookServiceError(message=f"Connection error: {exc.reason}", status_code=503) from exc
 
     def get_page(self, page_id: str) -> dict[str, Any]:
@@ -147,8 +170,11 @@ class FacebookGraphService:
 
         try:
             from urllib.request import urlopen
+            logger.info("Facebook Send API request recipient_id=%s", recipient_id)
             with urlopen(req, timeout=30) as response:
                 payload = response.read().decode("utf-8")
+                logger.info("Facebook Send API response recipient_id=%s status=%s", recipient_id, response.status)
                 return _json2.loads(payload) if payload else {}
         except Exception as exc:
+            logger.warning("Facebook Send API failed recipient_id=%s error=%s", recipient_id, exc)
             raise FacebookServiceError(message=f"Send message failed: {exc}", status_code=502) from exc

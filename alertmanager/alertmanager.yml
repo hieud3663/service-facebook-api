@@ -1,18 +1,149 @@
 global:
   resolve_timeout: 5m
 
+  # ── Gmail SMTP ──────────────────────────────────────
+  # Các giá trị được inject qua biến môi trường trong docker-compose
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: '{{ .ExternalURL }}'          # override bên dưới qua env
+  smtp_require_tls: true
+
 route:
-  receiver: "default"
+  receiver: 'email-alerts'
+  group_by: ['alertname', 'severity']
   group_wait: 10s
   group_interval: 5m
   repeat_interval: 1h
+
   routes:
+    # Critical (DLQ) → gửi ngay, không chờ group_wait
     - matchers:
         - severity="critical"
-      receiver: "default"
+      receiver: 'email-alerts'
       group_wait: 0s
+      repeat_interval: 30m
+
+    # Warning → gửi sau 10 giây (gom nhóm cùng loại)
+    - matchers:
+        - severity="warning"
+      receiver: 'email-alerts'
+      group_wait: 10s
+      repeat_interval: 2h
 
 receivers:
-  - name: "default"
-    webhook_configs: []
+  - name: 'email-alerts'
+    email_configs:
+      - smarthost: 'smtp.gmail.com:587'
+        from: 'ALERTMANAGER_SMTP_FROM_PLACEHOLDER'
+        to: 'ALERTMANAGER_EMAIL_TO_PLACEHOLDER'
+        auth_username: 'ALERTMANAGER_SMTP_AUTH_USERNAME_PLACEHOLDER'
+        auth_password: 'ALERTMANAGER_SMTP_AUTH_PASSWORD_PLACEHOLDER'
+        require_tls: true
+        send_resolved: true
 
+        # ── Subject ───────────────────────────────────
+        headers:
+          Subject: >-
+            [{{ .Status | toUpper }}]
+            {{ .GroupLabels.alertname }}
+            | Facebook API Alert System
+
+        # ── Body HTML ─────────────────────────────────
+        html: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <style>
+              body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
+              .container { max-width: 600px; margin: 20px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+              .header { padding: 20px 24px; color: #fff; }
+              .header.critical { background: #c0392b; }
+              .header.warning  { background: #e67e22; }
+              .header h1 { margin: 0; font-size: 20px; }
+              .body { padding: 24px; }
+              .alert-box { border-left: 4px solid #c0392b; background: #fdf2f2; padding: 12px 16px; margin-bottom: 16px; border-radius: 4px; }
+              .alert-box.warning { border-color: #e67e22; background: #fef9f0; }
+              .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+              .value { font-size: 14px; color: #333; }
+              .footer { padding: 16px 24px; background: #f9f9f9; font-size: 12px; color: #999; border-top: 1px solid #eee; }
+              .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; color: #fff; }
+              .badge.critical { background: #c0392b; }
+              .badge.warning  { background: #e67e22; }
+              .badge.resolved { background: #27ae60; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header {{ if eq .Status "firing" }}{{ with index .Alerts 0 }}{{ .Labels.severity }}{{ end }}{{ else }}resolved{{ end }}">
+                <h1>
+                  {{ if eq .Status "resolved" }}✅ RESOLVED{{ else }}🚨 ALERT FIRING{{ end }}
+                  — {{ .GroupLabels.alertname }}
+                </h1>
+              </div>
+              <div class="body">
+                <p>
+                  <span class="badge {{ if eq .Status "resolved" }}resolved{{ else }}{{ with index .Alerts 0 }}{{ .Labels.severity }}{{ end }}{{ end }}">
+                    {{ .Status | toUpper }}
+                  </span>
+                  &nbsp;
+                  <strong>{{ len .Alerts }} alert(s)</strong> at {{ .Alerts | len }} location(s)
+                </p>
+
+                {{ range .Alerts }}
+                <div class="alert-box {{ .Labels.severity }}">
+                  <div class="label">Summary</div>
+                  <div class="value">{{ .Annotations.summary }}</div>
+                  <br>
+                  <div class="label">Description</div>
+                  <div class="value">{{ .Annotations.description }}</div>
+                  <br>
+                  <div class="label">Severity</div>
+                  <div class="value">
+                    <span class="badge {{ .Labels.severity }}">{{ .Labels.severity | toUpper }}</span>
+                  </div>
+                  {{ if .Labels.topic }}
+                  <br>
+                  <div class="label">Kafka Topic</div>
+                  <div class="value">{{ .Labels.topic }}</div>
+                  {{ end }}
+                  {{ if .Labels.consumergroup }}
+                  <br>
+                  <div class="label">Consumer Group</div>
+                  <div class="value">{{ .Labels.consumergroup }}</div>
+                  {{ end }}
+                  <br>
+                  <div class="label">Fired At</div>
+                  <div class="value">{{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}</div>
+                </div>
+                {{ end }}
+
+                {{ if eq .Status "resolved" }}
+                <p style="color:#27ae60; font-weight:bold;">✅ Vấn đề đã được giải quyết lúc {{ with index .Alerts 0 }}{{ .EndsAt.Format "2006-01-02 15:04:05 UTC" }}{{ end }}</p>
+                {{ else }}
+                <p style="color:#c0392b;">⚠️ Hành động cần thiết: Kiểm tra <strong>Kafka UI</strong> tại
+                  <a href="http://localhost:8080">http://localhost:8080</a>
+                  và <strong>Alertmanager</strong> tại
+                  <a href="http://localhost:9093">http://localhost:9093</a>
+                </p>
+                {{ end }}
+              </div>
+              <div class="footer">
+                Hệ thống giám sát Facebook API | Prometheus + Alertmanager<br>
+                Email này được tự động tạo, vui lòng không reply.
+              </div>
+            </div>
+          </body>
+          </html>
+
+        # Fallback text (cho email client không render HTML)
+        text: |
+          [{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}
+
+          {{ range .Alerts }}
+          Summary: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Fired At: {{ .StartsAt }}
+          {{ end }}
+
+          Kiem tra: http://localhost:8080 (Kafka UI) | http://localhost:9093 (Alertmanager)

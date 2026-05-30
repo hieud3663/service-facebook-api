@@ -31,7 +31,16 @@ class EventProcessor:
     def process(self, event: dict[str, Any], force_retry: bool = False) -> dict:
         event_id = event.get("event_id", "")
         if not event_id:
+            logger.warning("Event processing rejected: missing event_id")
             return {"status": "failed", "error_message": "missing event_id", "raw_event": event}
+
+        logger.info(
+            "Processing event %s type=%s channel=%s force_retry=%s",
+            event_id[:8],
+            event.get("event_type", "unknown"),
+            event.get("channel", ""),
+            force_retry,
+        )
 
         # ── 1. Deduplicate / idempotency ──
         existing = ProcessedEvent.find_by_event_id(event_id)
@@ -51,6 +60,7 @@ class EventProcessor:
                 retry_count=retry_count,
                 error_message="",
             )
+            logger.info("Retrying event %s retry_count=%s", event_id[:8], retry_count)
             record = ProcessedEvent.find_by_event_id(event_id) or existing
         else:
             # ── 2. Persist ──
@@ -73,6 +83,7 @@ class EventProcessor:
                 raw_event=event,
                 occurred_at=occurred_at,
             )
+            logger.info("Stored new event %s status=received", event_id[:8])
 
         # ── 3. Decide ──
         try:
@@ -185,20 +196,29 @@ class EventProcessor:
         validation_error = self._validate_action_payload(decision)
         if validation_error:
             ActionLog.update(doc_id, status="skipped", error_message=validation_error)
+            logger.warning("Action %s skipped for event %s: %s", decision.action_type, event_id[:8], validation_error)
             return "skipped", validation_error
 
         if decision.action_type == "escalate":
             ActionLog.update(doc_id, status="success", response_payload={"note": "escalated to manual review queue"})
+            logger.info("Action escalate completed for event %s", event_id[:8])
             return "success", ""
 
         if decision.action_type not in {"hide_comment", "reply_comment", "reply_message"}:
             error = f"unknown action: {decision.action_type}"
             ActionLog.update(doc_id, status="skipped", error_message=error)
+            logger.warning("Action skipped for event %s: %s", event_id[:8], error)
             return "skipped", error
 
         retry_count = int(event.get("_retry_count", record.get("retry_count", 0) or 0) or 0)
         max_retries = int(event.get("_max_retries", 0) or 0) or None
-        command = build_reply_command(event, decision, idempotency_key, retry_count=retry_count, max_retries=max_retries)
+        command = build_reply_command(
+            event,
+            decision,
+            idempotency_key,
+            retry_count=retry_count,
+            max_retries=max_retries,
+        )
 
         try:
             result = self.reply_publisher.publish(command)
@@ -208,6 +228,12 @@ class EventProcessor:
                 request_payload=command,
                 response_payload=result,
                 error_message="",
+            )
+            logger.info(
+                "Action %s queued for event %s command_id=%s",
+                decision.action_type,
+                event_id[:8],
+                command.get("command_id", ""),
             )
             return "queued", ""
         except ReplyCommandPublishError as exc:

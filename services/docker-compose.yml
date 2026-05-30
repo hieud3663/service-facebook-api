@@ -225,13 +225,13 @@ services:
       - kafka-exporter
 
   alertmanager:
-    image: prom/alertmanager:latest
+    build:
+      context: ../alertmanager
+      dockerfile: Dockerfile
     ports:
       - "9093:9093"
-    volumes:
-      - ../alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-    command:
-      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    env_file:
+      - ../.env
     depends_on:
       - prometheus
 

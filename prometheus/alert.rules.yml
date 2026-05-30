@@ -1,21 +1,55 @@
 groups:
   - name: kafka_alerts
     rules:
+
+      # ── 1. Dead Letter Queue ─────────────────────────────────────────────
+      # Kích hoạt NGAY (for: 0m) khi có message mới vào dead_letter topic.
+      # Đây là critical alert vì message đã fail hết tất cả lần retry.
       - alert: DeadLetterQueueReceived
-        expr: increase(kafka_topic_partition_current_offset{topic="dead_letter"}[1m]) > 0
+        expr: >
+          increase(
+            kafka_topic_partition_current_offset{topic="dead_letter"}[1m]
+          ) > 0
         for: 0m
         labels:
           severity: critical
         annotations:
-          summary: "Co message moi vao Dead Letter Queue"
-          description: "Topic dead_letter vua nhan them message. Kiem tra Kafka UI de xem noi dung."
+          summary: "🚨 Message mới vào Dead Letter Queue"
+          description: >
+            Topic dead_letter vừa nhận thêm message — message này đã fail hết
+            số lần retry cho phép. Cần xử lý thủ công ngay.
+            Kiểm tra Kafka UI tại http://localhost:8080
+            và xem nội dung message để xử lý thủ công.
 
+      # ── 2. Consumer Lag cao ───────────────────────────────────────────────
+      # Cảnh báo khi consumer bị tồn đọng > 500 message trong 2 phút liên tiếp.
+      # Thường xảy ra khi service xử lý chậm hoặc bị crash.
       - alert: KafkaConsumerLagHigh
         expr: kafka_consumergroup_lag > 500
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "Consumer lag cao bat thuong"
-          description: "Consumer group {{ $labels.consumergroup }} dang lag {{ $value }} message."
+          summary: "⚠️ Consumer lag cao bất thường"
+          description: >
+            Consumer group {{ $labels.consumergroup }}
+            đang lag {{ $value }} message trên topic {{ $labels.topic }}.
+            Kiểm tra core-service hoặc api-service có đang chạy không.
 
+      # ── 3. Webhook Silent ─────────────────────────────────────────────────
+      # Cảnh báo khi raw_events không có message mới trong 10 phút liên tiếp.
+      # Có thể do Facebook Webhook subscription bị ngắt hoặc webhook-service crash.
+      - alert: WebhookReceiverSilent
+        expr: >
+          increase(
+            kafka_topic_partition_current_offset{topic="raw_events"}[5m]
+          ) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ Không có event nào từ Facebook trong 10 phút"
+          description: >
+            Topic raw_events không có message mới trong 10 phút liên tiếp.
+            Kiểm tra lại Facebook Webhook subscription và webhook-service
+            (port 3001) có đang hoạt động không.

@@ -25,6 +25,12 @@ def safe_json_deserializer(message):
 def create_consumer(topic: str):
     from kafka import KafkaConsumer
 
+    logger.info(
+        "Creating Kafka consumer topic=%s group_id=%s client_id=%s",
+        topic,
+        settings.KAFKA_CONSUMER_GROUP_ID,
+        settings.KAFKA_CLIENT_ID,
+    )
     return KafkaConsumer(
         topic,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
@@ -48,11 +54,18 @@ class KafkaPublisher:
             value_serializer=lambda v: json.dumps(v, ensure_ascii=True, default=str).encode("utf-8"),
             api_version_auto_timeout_ms=settings.KAFKA_API_VERSION_AUTO_TIMEOUT_MS,
         )
+        logger.info("Kafka producer initialized for api-service")
 
     def publish(self, topic: str, payload: dict) -> None:
         future = self.producer.send(topic, payload)
         future.get(timeout=settings.KAFKA_PRODUCER_SEND_TIMEOUT_SECONDS)
         self.producer.flush()
+        logger.info(
+            "Published Kafka message topic=%s command_id=%s event_id=%s",
+            topic,
+            payload.get("command_id", ""),
+            payload.get("event_id", ""),
+        )
 
     def close(self) -> None:
         self.producer.close()

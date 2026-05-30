@@ -96,6 +96,44 @@ SPECTACULAR_SETTINGS = {
 }
 
 # ── MongoDB (pymongo direct) ──
+LOG_LEVEL = env("LOG_LEVEL", default="INFO")
+LOG_FORMAT = env(
+    "LOG_FORMAT",
+    default="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": LOG_FORMAT,
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}
+
 MONGO_DB_NAME = env("MONGO_DB_NAME", default="core_service_db")
 MONGO_HOST = env("MONGO_HOST", default="mongodb")
 MONGO_PORT = env.int("MONGO_PORT", default=27017)

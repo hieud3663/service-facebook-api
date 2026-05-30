@@ -21,6 +21,12 @@ class KafkaPublisher:
         future = self._producer.send(topic, payload)
         future.get(timeout=10)
         self._producer.flush()
+        logger.info(
+            "Published Kafka message topic=%s command_id=%s event_id=%s",
+            topic,
+            payload.get("command_id", ""),
+            payload.get("event_id", ""),
+        )
 
     def close(self) -> None:
         self._producer.close()
@@ -29,6 +35,12 @@ class KafkaPublisher:
 def create_consumer(topic: str):
     from kafka import KafkaConsumer
 
+    logger.info(
+        "Creating Kafka consumer topic=%s group_id=%s client_id=%s",
+        topic,
+        settings.KAFKA_CONSUMER_GROUP_ID,
+        settings.KAFKA_CLIENT_ID,
+    )
     return KafkaConsumer(
         topic,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,

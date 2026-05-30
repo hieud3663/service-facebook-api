@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -13,15 +15,30 @@ from .serializers import (
 )
 from .services import FacebookGraphService, FacebookServiceError
 
+logger = logging.getLogger(__name__)
+
 
 class FacebookBaseAPIView(APIView):
     service_class = FacebookGraphService
 
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        logger.info(
+            "API request completed method=%s path=%s status=%s view=%s",
+            request.method,
+            request.get_full_path(),
+            response.status_code,
+            self.__class__.__name__,
+        )
+        return response
+
     def get_service(self) -> FacebookGraphService:
+        logger.info("Creating FacebookGraphService for view=%s", self.__class__.__name__)
         return self.service_class()
 
     @staticmethod
     def handle_error(exc: FacebookServiceError) -> Response:
+        logger.warning("Facebook API error status=%s message=%s", exc.status_code, exc.message)
         payload = {"detail": exc.message}
         if exc.details:
             payload["facebook_error"] = exc.details

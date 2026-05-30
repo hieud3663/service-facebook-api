@@ -51,11 +51,15 @@ jobs:
         with:
           clean: false
 
-      - name: Load service environment files
+      - name: Load environment files
         run: |
           set -euo pipefail
 
           ENV_DIR="${SERVICE_FACEBOOK_ENV_DIR:-${SERVICE_ENV_DIR}}"
+          ROOT_ENV_FILE_PATH="${ROOT_ENV_FILE_PATH:-$ENV_DIR/root.env}"
+          if [ ! -f "$ROOT_ENV_FILE_PATH" ] && [ -f "$ENV_DIR/.env" ]; then
+            ROOT_ENV_FILE_PATH="$ENV_DIR/.env"
+          fi
           API_ENV_FILE_PATH="${API_SERVICE_ENV_FILE_PATH:-$ENV_DIR/api-service.env}"
           WEBHOOK_ENV_FILE_PATH="${WEBHOOK_SERVICE_ENV_FILE_PATH:-$ENV_DIR/webhook-service.env}"
           CORE_ENV_FILE_PATH="${CORE_SERVICE_ENV_FILE_PATH:-$ENV_DIR/core-service.env}"
@@ -86,6 +90,7 @@ jobs:
             exit 1
           }
 
+          copy_private_file "$ROOT_ENV_FILE_PATH" "$GITHUB_WORKSPACE/.env"
           copy_private_file "$API_ENV_FILE_PATH" "$SERVICES_DIR/api-service/.env"
           copy_private_file "$WEBHOOK_ENV_FILE_PATH" "$SERVICES_DIR/webhook-service/.env"
           copy_private_file "$CORE_ENV_FILE_PATH" "$SERVICES_DIR/core-service/.env"

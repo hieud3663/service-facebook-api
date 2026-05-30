@@ -40,6 +40,8 @@ class Command(BaseCommand):
                 if not messages:
                     continue
 
+                total_records = sum(len(records) for records in messages.values())
+                logger.info("Polled %d reply_commands records", total_records)
                 for _tp, records in messages.items():
                     for record in records:
                         command = record.value
@@ -47,6 +49,11 @@ class Command(BaseCommand):
                             logger.warning("Skipping invalid reply_commands record at offset %s", record.offset)
                             continue
                         try:
+                            logger.info(
+                                "Consuming reply_commands offset=%s command_id=%s",
+                                record.offset,
+                                command.get("command_id", ""),
+                            )
                             result = processor.process(command)
                             logger.info("reply_commands result=%s command_id=%s", result.status, result.command_id)
                         except ReplyCommandValidationError as exc:

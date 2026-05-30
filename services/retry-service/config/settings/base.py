@@ -80,6 +80,44 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
 }
 
+LOG_LEVEL = env("LOG_LEVEL", default="INFO")
+LOG_FORMAT = env(
+    "LOG_FORMAT",
+    default="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": LOG_FORMAT,
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}
+
 RETRY_RUN_MODE = env("RETRY_RUN_MODE", default="web")
 RETRY_INTERNAL_API_KEY = env("RETRY_INTERNAL_API_KEY", default="")
 
@@ -104,4 +142,3 @@ KAFKA_API_VERSION_AUTO_TIMEOUT_MS = env.int("KAFKA_API_VERSION_AUTO_TIMEOUT_MS",
 RETRY_BASE_DELAY_SECONDS = env.int("RETRY_BASE_DELAY_SECONDS", default=1)
 RETRY_MAX_DELAY_SECONDS = env.int("RETRY_MAX_DELAY_SECONDS", default=60)
 RETRY_MAX_ATTEMPTS = env.int("RETRY_MAX_ATTEMPTS", default=3)
-

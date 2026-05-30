@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 import uuid
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
@@ -29,6 +30,8 @@ NON_RETRYABLE_FAILURE_TYPES = {
     "unsupported_action",
 }
 
+logger = logging.getLogger(__name__)
+
 
 class RetryValidationError(Exception):
     pass
@@ -50,19 +53,40 @@ class RetryProcessor:
         existing = RetryAttempt.find_by_command_id(command_id)
         retry_count = int(normalized.get("retry_count", 0) or 0)
         max_retries = int(normalized.get("max_retries", settings.RETRY_MAX_ATTEMPTS))
+        logger.info(
+            "Processing retry message command_id=%s event_id=%s retry_count=%s max_retries=%s failure_type=%s",
+            command_id,
+            normalized.get("event_id", ""),
+            retry_count,
+            max_retries,
+            normalized.get("failure_type", "unknown"),
+        )
 
         if existing and existing.get("status") == "dead_lettered":
+            logger.info("Retry message skipped command_id=%s reason=already_dead_lettered", command_id)
             return {"status": "skipped", "reason": "already_dead_lettered", "command_id": command_id}
 
         if not self._is_retryable(normalized) or retry_count >= max_retries:
             payload = self._build_dead_letter_payload(normalized, retry_count, max_retries)
             self.publisher.publish(settings.KAFKA_DEAD_LETTER_TOPIC, payload)
             RetryAttempt.mark_dead_lettered(normalized, retry_count, payload["reason"])
+            logger.warning(
+                "Retry message dead_lettered command_id=%s event_id=%s reason=%s topic=%s",
+                command_id,
+                normalized.get("event_id", ""),
+                payload["reason"],
+                settings.KAFKA_DEAD_LETTER_TOPIC,
+            )
             return {"status": "dead_lettered", "topic": settings.KAFKA_DEAD_LETTER_TOPIC, "payload": payload}
 
         next_retry_count = retry_count + 1
         scheduled_counts = set((existing or {}).get("scheduled_retry_counts", []))
         if next_retry_count in scheduled_counts:
+            logger.info(
+                "Retry message skipped command_id=%s reason=duplicate_retry retry_count=%s",
+                command_id,
+                next_retry_count,
+            )
             return {"status": "skipped", "reason": "duplicate_retry", "command_id": command_id}
 
         delay = calculate_backoff_seconds(
@@ -74,9 +98,18 @@ class RetryProcessor:
         retry_payload = self._build_send_retry_payload(normalized, next_retry_count, next_retry_at)
 
         if delay > 0:
+            logger.info("Retry message sleeping command_id=%s delay_seconds=%s", command_id, delay)
             self.sleep_func(delay)
         self.publisher.publish(settings.KAFKA_SEND_RETRY_TOPIC, retry_payload)
         RetryAttempt.mark_scheduled(normalized, next_retry_count, next_retry_at)
+        logger.info(
+            "Retry message scheduled command_id=%s event_id=%s retry_count=%s topic=%s next_retry_at=%s",
+            command_id,
+            normalized.get("event_id", ""),
+            next_retry_count,
+            settings.KAFKA_SEND_RETRY_TOPIC,
+            next_retry_at.isoformat(),
+        )
         return {"status": "scheduled", "topic": settings.KAFKA_SEND_RETRY_TOPIC, "payload": retry_payload}
 
     def _validate(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -110,7 +143,11 @@ class RetryProcessor:
         return failure_type in RETRYABLE_FAILURE_TYPES
 
     @staticmethod
-    def _build_send_retry_payload(message: dict[str, Any], retry_count: int, next_retry_at: datetime) -> dict[str, Any]:
+    def _build_send_retry_payload(
+        message: dict[str, Any],
+        retry_count: int,
+        next_retry_at: datetime,
+    ) -> dict[str, Any]:
         return {
             "command_id": message["command_id"],
             "event_id": message.get("event_id", ""),
@@ -145,4 +182,3 @@ class RetryProcessor:
             "original_message": message,
             "processor": "retry-service",
         }
-

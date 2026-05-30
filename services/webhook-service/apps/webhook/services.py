@@ -172,21 +172,25 @@ class KafkaRawEventPublisher:
             acks=settings.KAFKA_ACKS,
             value_serializer=lambda value: json.dumps(value, ensure_ascii=True).encode("utf-8"),
         )
+        logger.info("Kafka producer initialized topic=%s client_id=%s", self.topic, settings.KAFKA_CLIENT_ID)
         return self._producer
 
     def publish(self, events: list[dict[str, Any]]) -> int:
         if not events:
+            logger.info("No normalized Facebook events to publish")
             return 0
 
         producer = self._get_producer()
         published_count = 0
 
         try:
+            logger.info("Publishing %d normalized Facebook events to topic=%s", len(events), self.topic)
             for event in events:
                 future = producer.send(self.topic, event)
                 future.get(timeout=settings.KAFKA_PUBLISH_TIMEOUT_SECONDS)
                 published_count += 1
             producer.flush()
+            logger.info("Published %d normalized Facebook events to topic=%s", published_count, self.topic)
             return published_count
         except Exception as exc:  # pragma: no cover
             logger.exception("Failed to publish events to Kafka topic %s", self.topic)
@@ -203,6 +207,7 @@ class FacebookSubscriptionService:
 
     def subscribe_page_comment_events(self, page_id: str) -> dict[str, Any]:
         if not self.access_token:
+            logger.error("Cannot subscribe page_id=%s because FACEBOOK_PAGE_ACCESS_TOKEN is missing", page_id)
             raise FacebookSubscriptionError("Missing FACEBOOK_PAGE_ACCESS_TOKEN in environment")
 
         params = {
@@ -220,6 +225,7 @@ class FacebookSubscriptionService:
         try:
             with urlopen(request, timeout=30) as response:
                 payload = response.read().decode("utf-8")
+                logger.info("Facebook subscribed page_id=%s status=%s", page_id, response.status)
                 return json.loads(payload) if payload else {"success": True}
         except HTTPError as exc:
             raw = exc.read().decode("utf-8")
@@ -228,6 +234,13 @@ class FacebookSubscriptionService:
             except json.JSONDecodeError:
                 details = {"raw": raw}
             message = details.get("error", {}).get("message", "Facebook subscription error")
+            logger.warning(
+                "Facebook subscription HTTP error page_id=%s status=%s message=%s",
+                page_id,
+                exc.code,
+                message,
+            )
             raise FacebookSubscriptionError(message) from exc
         except URLError as exc:
+            logger.warning("Facebook subscription connection error page_id=%s reason=%s", page_id, exc.reason)
             raise FacebookSubscriptionError(f"Connection error: {exc.reason}") from exc

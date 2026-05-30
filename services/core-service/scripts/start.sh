@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -e
+export PYTHONUNBUFFERED=1
 
 # Django admin tables (SQLite)
 python manage.py migrate --noinput
@@ -22,4 +23,4 @@ if [ "$CORE_RUN_MODE" != "web" ]; then
   python manage.py consume_events &
 fi
 
-exec gunicorn config.wsgi:application --bind 0.0.0.0:3003 --workers 2 --timeout 120
+exec gunicorn config.wsgi:application --bind 0.0.0.0:3003 --workers 2 --timeout 120 --access-logfile - --error-logfile - --log-level "${LOG_LEVEL:-info}"

@@ -58,13 +58,27 @@ class Command(BaseCommand):
                 if not messages:
                     continue
 
+                total_records = sum(len(records) for records in messages.values())
+                logger.info("Polled %d raw_events records", total_records)
                 for _tp, records in messages.items():
                     for record in records:
                         event = record.value
                         if event is None:
                             logger.warning("Skipping invalid raw_events record at offset %s", record.offset)
                             continue
+                        logger.info(
+                            "Consuming raw_events offset=%s event_id=%s",
+                            record.offset,
+                            event.get("event_id", "")[:8],
+                        )
                         success, result = self._process_with_fast_retry(processor, event)
+                        logger.info(
+                            "Processed raw_events offset=%s event_id=%s success=%s status=%s",
+                            record.offset,
+                            event.get("event_id", "")[:8],
+                            success,
+                            result.get("status", ""),
+                        )
                         if not success:
                             payload = build_failure_payload(
                                 event,
@@ -127,6 +141,7 @@ class Command(BaseCommand):
 
         for attempt in range(attempts):
             try:
+                logger.info("Processing event %s attempt=%s/%s", event_id[:8], attempt + 1, attempts)
                 result = processor.process(event, force_retry=attempt > 0)
                 last_result = result if isinstance(result, dict) else {}
                 if last_result.get("status") != "failed":
@@ -137,6 +152,7 @@ class Command(BaseCommand):
 
             if attempt < attempts - 1:
                 retry_count = attempt + 1
+                logger.warning("Fast retry scheduled for event %s retry_count=%s", event_id[:8], retry_count)
                 if event_id:
                     ProcessedEvent.update_by_event_id(
                         event_id,
@@ -155,6 +171,7 @@ class Command(BaseCommand):
             )
         last_result["status"] = "send_failed"
         last_result["retry_count"] = max(0, attempts - 1)
+        logger.warning("Event %s marked send_failed after %s attempts", event_id[:8], attempts)
         return False, last_result
 
     @staticmethod

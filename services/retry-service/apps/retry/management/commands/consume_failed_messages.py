@@ -40,12 +40,20 @@ class Command(BaseCommand):
                 if not messages:
                     continue
 
+                total_records = sum(len(records) for records in messages.values())
+                logger.info("Polled %d send_failed records", total_records)
                 for _tp, records in messages.items():
                     for record in records:
                         if record.value is None:
                             logger.warning("Skipping invalid send_failed record at offset %s", record.offset)
                             continue
                         try:
+                            logger.info(
+                                "Consuming send_failed offset=%s command_id=%s event_id=%s",
+                                record.offset,
+                                record.value.get("command_id", ""),
+                                record.value.get("event_id", ""),
+                            )
                             result = processor.process(record.value)
                             logger.info("Retry processor result: %s", result.get("status"))
                         except RetryValidationError as exc:

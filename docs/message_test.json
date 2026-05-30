@@ -1,0 +1,25 @@
+{
+	"command_id": "demo-event-005:reply_comment:demo-comment-005",
+	"event_id": "demo-event-005",
+	"action_type": "reply_comment",
+	"target_id": "demo-comment-005",
+	"page_id": "demo-page",
+	"retry_count": 0,
+	"max_retries": 3,
+	"retryable": true,
+	"failure_type": "api_timeout",
+	"reason": "demo timeout",
+	"payload": {
+		"comment_id": "demo-comment-005",
+		"message": "hello"
+	},
+	"raw_event": {
+		"event_id": "demo-event-005",
+		"event_type": "comment",
+		"page_id": "demo-page",
+		"sender_id": "demo-user",
+		"comment_id": "demo-comment-005",
+		"message_text": "demo"
+	},
+	"source_service": "demo"
+}

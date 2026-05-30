@@ -94,6 +94,44 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
 }
 
+LOG_LEVEL = env("LOG_LEVEL", default="INFO")
+LOG_FORMAT = env(
+    "LOG_FORMAT",
+    default="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": LOG_FORMAT,
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}
+
 FACEBOOK_GRAPH_API_VERSION = env("FACEBOOK_GRAPH_API_VERSION", default="v22.0")
 FACEBOOK_PAGE_ACCESS_TOKEN = env("FACEBOOK_PAGE_ACCESS_TOKEN", default="")
 FACEBOOK_WEBHOOK_VERIFY_TOKEN = env("FACEBOOK_WEBHOOK_VERIFY_TOKEN", default="")
