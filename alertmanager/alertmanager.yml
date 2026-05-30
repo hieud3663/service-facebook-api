@@ -121,9 +121,9 @@ receivers:
                 <p style="color:#27ae60; font-weight:bold;">✅ Vấn đề đã được giải quyết lúc {{ with index .Alerts 0 }}{{ .EndsAt.Format "2006-01-02 15:04:05 UTC" }}{{ end }}</p>
                 {{ else }}
                 <p style="color:#c0392b;">⚠️ Hành động cần thiết: Kiểm tra <strong>Kafka UI</strong> tại
-                  <a href="http://localhost:8080">http://localhost:8080</a>
+                  <a href="http://47.129.185.139:8080">http://47.129.185.139:8080</a>
                   và <strong>Alertmanager</strong> tại
-                  <a href="http://localhost:9093">http://localhost:9093</a>
+                  <a href="http://47.129.185.139:9093">http://47.129.185.139:9093</a>
                 </p>
                 {{ end }}
               </div>
@@ -146,4 +146,4 @@ receivers:
           Fired At: {{ .StartsAt }}
           {{ end }}
 
-          Kiem tra: http://localhost:8080 (Kafka UI) | http://localhost:9093 (Alertmanager)
+          Kiểm tra: http://47.129.185.139:8080 (Kafka UI) | http://47.129.185.139:9093 (Alertmanager)
