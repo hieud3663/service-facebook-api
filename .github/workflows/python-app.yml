@@ -186,6 +186,7 @@ jobs:
           $COMPOSE build webhook-service
           $COMPOSE build core-service
           $COMPOSE build retry-service
+          $COMPOSE build alertmanager
           $COMPOSE build nginx
 
           $COMPOSE up -d mongodb kafka
@@ -196,6 +197,10 @@ jobs:
           $COMPOSE up -d --no-build --remove-orphans \
             mongodb \
             kafka \
+            kafka-ui \
+            kafka-exporter \
+            prometheus \
+            alertmanager \
             api-service \
             api-worker \
             webhook-service \
